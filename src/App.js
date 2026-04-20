@@ -134,6 +134,42 @@ function getScore(sd, tid, list){
   return cnt ? Math.round(tot/cnt) : null;
 }
 
+// ───── PERÍODOS MENSUALES (25 al 25) ─────
+const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+// Período "Marzo 2026" = 25 Feb 2026 → 25 Mar 2026
+// mesIdx: 0=Enero, 1=Febrero...
+function getPeriodRange(mesIdx, anio){
+  // Inicio: día 25 del mes ANTERIOR
+  const startMonth = mesIdx === 0 ? 11 : mesIdx - 1;
+  const startYear  = mesIdx === 0 ? anio - 1 : anio;
+  const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-25`;
+  // Fin: día 25 del mes actual
+  const end = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
+  return { start, end, label: `${MESES[mesIdx]} ${anio}`, labelCorto: `25/${startMonth+1<10?"0":""}${startMonth+1} — 25/${mesIdx+1<10?"0":""}${mesIdx+1}/${anio}` };
+}
+
+// Filtrar registros por período (fecha >= start AND fecha < end)
+function filterByPeriod(recs, mesIdx, anio){
+  const { start, end } = getPeriodRange(mesIdx, anio);
+  return recs.filter(r => r.dt >= start && r.dt < end);
+}
+
+// Obtener período actual basado en la fecha de hoy
+function getCurrentPeriod(){
+  const hoy = new Date();
+  const d = hoy.getDate();
+  let m = hoy.getMonth(); // 0-indexed
+  let y = hoy.getFullYear();
+  // Si estamos antes del 25, el período actual es este mes
+  // Si estamos el 25 o después, el período actual es el próximo mes
+  if(d >= 25){
+    m = m + 1;
+    if(m > 11){ m = 0; y++; }
+  }
+  return { mes: m, anio: y };
+}
+
 // ───── COMPONENTES UI ─────
 function Cat({c,lg}){
   const a=c==="A";
@@ -267,6 +303,7 @@ export default function App(){
     {id:"ri",  ic:"◈",l:"Resumen"},
     {id:"rp",  ic:"▤",l:"Resumen Producto"},
     {id:"sc",  ic:"◎",l:"Scorecard",edit:true},
+    {id:"rep", ic:"📊",l:"Reportes Mensuales",money:true},
     {id:"adm", ic:"⚙",l:"Administración Personal",edit:true},
     {id:"tb",  ic:"▦",l:"Tablas de Pago"},
     {id:"pg",  ic:"$",l:"Pagos & Incentivos",money:true},
@@ -406,6 +443,7 @@ export default function App(){
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
         {tab==="sc"   && !publicOnly && <SCV inst={inst} ayud={ayud} scores={scores} svS={svS} scoresA={scoresA} svSA={svSA} bI={bI} bA={bA} canEdit={canEdit}/>}
         {tab==="adm"  && !publicOnly && <AdminV inst={inst} svI={svI} ayud={ayud} svA={svA} canEdit={canEdit} scores={scores} scoresA={scoresA}/>}
+        {tab==="rep"  && canMoney && <ReportV inst={inst} ayud={ayud} recs={recs}/>}
         {tab==="tb"   && !publicOnly && <TBV/>}
         {tab==="pg"   && canMoney && <PGV inst={inst} ayud={ayud} bI={bI} bA={bA}/>}
       </div>
@@ -1244,6 +1282,282 @@ function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA}){
           </>}
         </div>;
       })}
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// REPORTES MENSUALES — Período 25 al 25, exportar a PDF
+// ═══════════════════════════════════════════════════════════
+function ReportV({inst,ayud,recs}){
+  const cur = getCurrentPeriod();
+  const [mes,setMes] = useState(cur.mes);
+  const [anio,setAnio] = useState(cur.anio);
+  const [pdfLoading,setPdfLoading] = useState(false);
+
+  const period = getPeriodRange(mes,anio);
+  const fRecs = filterByPeriod(recs, mes, anio);
+
+  // Resumen instaladores del período
+  const rI = useMemo(()=>{
+    const m={};
+    fRecs.forEach(r=>{
+      if(!m[r.i]) m[r.i]={mt:0,pi:0,n:0};
+      m[r.i].mt+=r.ml||0; m[r.i].pi+=r.pi||0; m[r.i].n+=1;
+    });
+    return Object.entries(m).sort((a,b)=>b[1].mt-a[1].mt);
+  },[fRecs]);
+
+  // Resumen ayudantes del período
+  const rA = useMemo(()=>{
+    const m={};
+    fRecs.forEach(r=>{
+      if(!r.a||r.a==="—") return;
+      if(!m[r.a]) m[r.a]={mt:0,pa:0,n:0};
+      m[r.a].mt+=r.ml||0; m[r.a].pa+=r.pa||0; m[r.a].n+=1;
+    });
+    return Object.entries(m).sort((a,b)=>b[1].mt-a[1].mt);
+  },[fRecs]);
+
+  const totMt=rI.reduce((a,x)=>a+x[1].mt,0);
+  const totPI=rI.reduce((a,x)=>a+x[1].pi,0);
+  const totPA=rA.reduce((a,x)=>a+x[1].pa,0);
+
+  // Años disponibles (basado en registros)
+  const years = useMemo(()=>{
+    const ySet = new Set([anio]);
+    recs.forEach(r=>{ if(r.dt) ySet.add(parseInt(r.dt.substring(0,4))) });
+    return [...ySet].sort();
+  },[recs,anio]);
+
+  // Navegar meses
+  function prevMonth(){
+    if(mes===0){setMes(11);setAnio(anio-1)} else setMes(mes-1);
+  }
+  function nextMonth(){
+    if(mes===11){setMes(0);setAnio(anio+1)} else setMes(mes+1);
+  }
+
+  // EXPORTAR A PDF usando html2canvas + jsPDF vía CDN
+  async function exportPDF(){
+    setPdfLoading(true);
+    try {
+      // Cargar libs dinámicamente si no están cargadas
+      if(!window.html2canvas){
+        await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+      }
+      if(!window.jspdf){
+        await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
+      }
+
+      const el = document.getElementById("report-content");
+      if(!el) return;
+
+      const canvas = await window.html2canvas(el, {
+        backgroundColor: "#060a13",
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new window.jspdf.jsPDF({
+        orientation: canvas.width > canvas.height ? "landscape" : "portrait",
+        unit: "mm",
+        format: "letter"
+      });
+
+      const pageW = pdf.internal.pageSize.getWidth();
+      const pageH = pdf.internal.pageSize.getHeight();
+      const margin = 10;
+      const usableW = pageW - margin*2;
+      const imgW = usableW;
+      const imgH = (canvas.height * imgW) / canvas.width;
+
+      // Si es más alto que una página, dividir en múltiples páginas
+      let yOffset = 0;
+      const pageImgH = pageH - margin*2;
+
+      if(imgH <= pageImgH){
+        pdf.addImage(imgData, "PNG", margin, margin, imgW, imgH);
+      } else {
+        // Multi-page
+        let remaining = imgH;
+        let srcY = 0;
+        let pageNum = 0;
+        while(remaining > 0){
+          if(pageNum > 0) pdf.addPage();
+          const sliceH = Math.min(remaining, pageImgH);
+          // Render full image offset
+          pdf.addImage(imgData, "PNG", margin, margin - (srcY * imgW / canvas.width), imgW, imgH);
+          // Clip to page
+          srcY += (sliceH * canvas.width / imgW);
+          remaining -= sliceH;
+          pageNum++;
+          if(pageNum > 10) break; // safety
+        }
+      }
+
+      pdf.save(`FPC_Reporte_${MESES[mes]}_${anio}.pdf`);
+    } catch(e) {
+      console.error("Error generando PDF:", e);
+      alert("Error al generar PDF. Intente de nuevo o use Ctrl+P para imprimir como PDF.");
+    }
+    setPdfLoading(false);
+  }
+
+  function loadScript(src){
+    return new Promise((resolve,reject)=>{
+      const s=document.createElement("script");
+      s.src=src; s.onload=resolve; s.onerror=reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  return <div>
+    <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:"0 0 4px"}}>📊 Reportes Mensuales</h1>
+    <p style={{fontSize:13,color:"#475569",margin:"0 0 18px"}}>Período de pago: del 25 al 25 de cada mes</p>
+
+    {/* Selector de período */}
+    <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:20}}>
+      <button className="btn bg" onClick={prevMonth} style={{padding:"8px 14px",fontSize:18}}>◀</button>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <select className="sel" value={mes} onChange={e=>setMes(parseInt(e.target.value))} style={{width:160}}>
+          {MESES.map((m,i)=><option key={i} value={i}>{m}</option>)}
+        </select>
+        <select className="sel" value={anio} onChange={e=>setAnio(parseInt(e.target.value))} style={{width:100}}>
+          {years.map(y=><option key={y} value={y}>{y}</option>)}
+        </select>
+      </div>
+      <button className="btn bg" onClick={nextMonth} style={{padding:"8px 14px",fontSize:18}}>▶</button>
+      <div style={{flex:1}}/>
+      <button className="btn bp" onClick={exportPDF} disabled={pdfLoading} style={{padding:"10px 20px",display:"flex",alignItems:"center",gap:8}}>
+        {pdfLoading ? "⏳ Generando..." : "📄 Exportar PDF"}
+      </button>
+      <button className="btn bg" onClick={()=>window.print()} style={{padding:"10px 16px"}}>🖨 Imprimir</button>
+    </div>
+
+    {/* Contenido del reporte (se captura para PDF) */}
+    <div id="report-content" style={{background:"#060a13",padding:4}}>
+      {/* Header del reporte */}
+      <div style={{padding:"20px 24px",background:"linear-gradient(135deg,rgba(15,23,42,.95),rgba(15,23,42,.7))",borderRadius:14,marginBottom:16,border:"1px solid rgba(30,48,72,.5)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:16}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:800,letterSpacing:4,color:"#3b82f6",marginBottom:4}}>GRUPO FPC</div>
+            <div style={{fontSize:22,fontWeight:900,color:"#f1f5f9"}}>Reporte de Pagos — {period.label}</div>
+            <div style={{fontSize:12,color:"#64748b",marginTop:4}}>Período: {period.labelCorto}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:10,color:"#64748b",textTransform:"uppercase"}}>Generado</div>
+            <div style={{fontSize:13,color:"#94a3b8"}}>{new Date().toLocaleDateString("es-GT",{day:"numeric",month:"long",year:"numeric"})}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* KPIs del período */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))",gap:12,marginBottom:16}}>
+        <KPI label="Registros" value={fRecs.length} accent="#f1f5f9" icon="✎"/>
+        <KPI label="Metros Totales" value={N(totMt)} accent="#60a5fa" icon="▤"/>
+        <KPI label="Pago Instaladores" value={Q(totPI)} accent="#10b981" icon="$"/>
+        <KPI label="Pago Ayudantes" value={Q(totPA)} accent="#a78bfa" icon="$"/>
+        <KPI label="Gran Total" value={Q(totPI+totPA)} accent="#fbbf24" icon="★"/>
+      </div>
+
+      {/* Tabla Instaladores */}
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Pago Instaladores — {period.label}</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>
+              {["#","Instalador","Cat","Inst.","Metros","Q Pago"].map((h,i)=><th key={h} className="th" style={i>=3?{textAlign:"right"}:{}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+            {rI.map(([n,d],i)=>{
+              const t=inst.find(x=>x.name===n);
+              return <tr key={n}>
+                <td className="td" style={{color:"#475569",fontWeight:700}}>{i+1}</td>
+                <td className="td" style={{fontWeight:700}}>{n}</td>
+                <td className="td">{t&&<Cat c={t.cat}/>}</td>
+                <td className="td" style={{textAlign:"right"}}>{d.n}</td>
+                <td className="td" style={{textAlign:"right",color:"#60a5fa",fontWeight:700}}>{N(d.mt)}</td>
+                <td className="td" style={{textAlign:"right",fontWeight:900,color:"#10b981",fontSize:13}}>{Q(d.pi)}</td>
+              </tr>;
+            })}
+            {rI.length>0&&<tr style={{background:"rgba(12,20,36,.5)"}}>
+              <td className="td" colSpan={4} style={{fontWeight:800,borderTop:"2px solid rgba(30,48,72,.5)"}}>TOTAL INSTALADORES</td>
+              <td className="td" style={{textAlign:"right",fontWeight:800,color:"#60a5fa",borderTop:"2px solid rgba(30,48,72,.5)"}}>{N(totMt)}</td>
+              <td className="td" style={{textAlign:"right",fontWeight:900,color:"#10b981",fontSize:14,borderTop:"2px solid rgba(30,48,72,.5)"}}>{Q(totPI)}</td>
+            </tr>}
+            </tbody>
+          </table>
+          {!rI.length&&<div style={{padding:30,textAlign:"center",color:"#475569",fontSize:13}}>Sin registros en este período</div>}
+        </div>
+      </div>
+
+      {/* Tabla Ayudantes */}
+      <div className="card" style={{marginBottom:16}}>
+        <div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Pago Ayudantes — {period.label}</div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>
+              {["#","Ayudante","Cat","Inst.","Metros","Q Pago"].map((h,i)=><th key={h} className="th" style={i>=3?{textAlign:"right"}:{}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+            {rA.map(([n,d],i)=>{
+              const t=ayud.find(x=>x.name===n);
+              return <tr key={n}>
+                <td className="td" style={{color:"#475569",fontWeight:700}}>{i+1}</td>
+                <td className="td" style={{fontWeight:700}}>{n}</td>
+                <td className="td">{t&&<Cat c={t.cat}/>}</td>
+                <td className="td" style={{textAlign:"right"}}>{d.n}</td>
+                <td className="td" style={{textAlign:"right",color:"#a78bfa",fontWeight:700}}>{N(d.mt)}</td>
+                <td className="td" style={{textAlign:"right",fontWeight:900,color:"#10b981",fontSize:13}}>{Q(d.pa)}</td>
+              </tr>;
+            })}
+            {rA.length>0&&<tr style={{background:"rgba(12,20,36,.5)"}}>
+              <td className="td" colSpan={4} style={{fontWeight:800,borderTop:"2px solid rgba(30,48,72,.5)"}}>TOTAL AYUDANTES</td>
+              <td className="td" style={{textAlign:"right",fontWeight:800,color:"#a78bfa",borderTop:"2px solid rgba(30,48,72,.5)"}}>{N(rA.reduce((a,x)=>a+x[1].mt,0))}</td>
+              <td className="td" style={{textAlign:"right",fontWeight:900,color:"#10b981",fontSize:14,borderTop:"2px solid rgba(30,48,72,.5)"}}>{Q(totPA)}</td>
+            </tr>}
+            </tbody>
+          </table>
+          {!rA.length&&<div style={{padding:30,textAlign:"center",color:"#475569",fontSize:13}}>Sin registros en este período</div>}
+        </div>
+      </div>
+
+      {/* Detalle de registros del período */}
+      <div className="card">
+        <div className="card-h" style={{justifyContent:"space-between"}}>
+          <span><span style={{color:"#64748b"}}>▤</span> Detalle de Instalaciones — {period.label}</span>
+          <span style={{fontSize:11,color:"#64748b"}}>{fRecs.length} registros</span>
+        </div>
+        <div style={{overflowX:"auto",maxHeight:500}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr>
+              {["Fecha","Cotización","Cliente","Instalador","Ayudante","Producto","Mts","Q Inst","Q Ayud"].map((h,i)=><th key={h} className="th" style={i>=6?{textAlign:"right"}:{}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+            {fRecs.map(r=><tr key={r.id}>
+              <td className="td" style={{color:"#94a3b8"}}>{r.dt}</td>
+              <td className="td" style={{color:"#cbd5e1"}}>{r.co||"—"}</td>
+              <td className="td" style={{maxWidth:140,overflow:"hidden",textOverflow:"ellipsis"}}>{r.cl||"—"}</td>
+              <td className="td" style={{fontWeight:700}}>{r.i}</td>
+              <td className="td" style={{color:"#a78bfa"}}>{r.a||"—"}</td>
+              <td className="td" style={{color:"#60a5fa",fontWeight:600}}>{r.p}</td>
+              <td className="td" style={{textAlign:"right",fontWeight:800}}>{N(r.ml)}</td>
+              <td className="td" style={{textAlign:"right",color:"#10b981"}}>{Q(r.pi)}</td>
+              <td className="td" style={{textAlign:"right",color:"#10b981"}}>{Q(r.pa)}</td>
+            </tr>)}
+            </tbody>
+          </table>
+          {!fRecs.length&&<div style={{padding:40,textAlign:"center",color:"#475569",fontSize:13}}>No hay registros en el período {period.labelCorto}</div>}
+        </div>
+      </div>
+
+      {/* Footer del reporte */}
+      <div style={{padding:"14px 20px",marginTop:12,textAlign:"center"}}>
+        <div style={{fontSize:10,color:"#334155"}}>GRUPO FPC — Reporte generado el {new Date().toLocaleDateString("es-GT")} — Período {period.labelCorto}</div>
+      </div>
     </div>
   </div>;
 }
