@@ -317,10 +317,75 @@ export default function App(){
 
   useEffect(()=>{ if(publicOnly && tab!=="dash") setTab("dash") },[publicOnly,tab]);
 
-  if(!ok) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#060a13",fontFamily:"'Inter',system-ui,sans-serif"}}>
+  // ─── PANTALLA DE CARGA ───
+  if(!ok) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#020617 0%,#0a1628 40%,#0f172a 100%)",fontFamily:"'Inter',system-ui,sans-serif"}}>
     <div style={{textAlign:"center"}}>
-      <div style={{fontSize:11,fontWeight:800,letterSpacing:6,color:"#3b82f6",marginBottom:8}}>GRUPO FPC</div>
-      <div style={{fontSize:28,fontWeight:900,color:"#f1f5f9"}}>Sistema de Instalaciones</div>
+      <img src="/logo-fpc.png" alt="FPC" style={{width:120,height:120,objectFit:"contain",marginBottom:20,opacity:.9}}/>
+      <div style={{fontSize:13,fontWeight:700,letterSpacing:3,color:"#d97706",marginBottom:6}}>SOLUCIONES DECORATIVAS</div>
+      <div style={{fontSize:11,color:"#475569",marginTop:12}}>Cargando sistema...</div>
+    </div>
+  </div>;
+
+  // ─── PORTADA DE LOGIN (cuando no hay usuario logueado) ───
+  if(!user) return <div style={{fontFamily:"'Inter',-apple-system,sans-serif",minHeight:"100vh",background:"linear-gradient(135deg,#020617 0%,#0a1628 40%,#0f172a 100%)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,position:"relative",overflow:"hidden"}}>
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+      *{box-sizing:border-box;margin:0}
+      @keyframes fadeIn{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+      @keyframes glow{0%,100%{opacity:.3}50%{opacity:.6}}
+      @keyframes slideUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+      .login-card{animation:fadeIn .8s ease-out}
+      .login-glow{position:absolute;width:400px;height:400px;border-radius:50%;filter:blur(120px);animation:glow 4s ease-in-out infinite}
+      .login-inp{padding:14px 18px;border-radius:12px;border:1px solid rgba(51,65,85,.5);background:rgba(15,23,42,.8);color:#e2e8f0;font-size:14px;outline:none;width:100%;box-sizing:border-box;font-family:inherit;transition:all .3s}
+      .login-inp:focus{border-color:#d97706;box-shadow:0 0 0 3px rgba(217,119,6,.15)}
+      .login-inp::placeholder{color:#475569}
+      .login-btn{width:100%;padding:14px;border-radius:12px;border:none;font-size:14px;font-weight:800;cursor:pointer;transition:all .3s;font-family:inherit;letter-spacing:.5px;text-transform:uppercase}
+    `}</style>
+
+    {/* Glows decorativos */}
+    <div className="login-glow" style={{top:-100,left:-100,background:"rgba(217,119,6,.08)"}}/>
+    <div className="login-glow" style={{bottom:-100,right:-100,background:"rgba(37,99,235,.06)"}}/>
+
+    <div className="login-card" style={{width:440,maxWidth:"100%",position:"relative",zIndex:1}}>
+      {/* Logo y branding */}
+      <div style={{textAlign:"center",marginBottom:36}}>
+        <img src="/logo-fpc.png" alt="FPC Soluciones Decorativas" style={{width:160,height:160,objectFit:"contain",marginBottom:16,filter:"drop-shadow(0 8px 24px rgba(0,0,0,.4))"}}/>
+        <div style={{fontSize:11,fontWeight:700,letterSpacing:4,color:"#d97706",marginBottom:6}}>SOLUCIONES DECORATIVAS</div>
+        <div style={{fontSize:22,fontWeight:900,color:"#f1f5f9",letterSpacing:-.5}}>Sistema de Control de Instalaciones</div>
+      </div>
+
+      {/* Formulario */}
+      <div style={{background:"rgba(15,23,42,.6)",backdropFilter:"blur(20px)",borderRadius:20,padding:"36px 32px",border:"1px solid rgba(51,65,85,.3)",boxShadow:"0 25px 60px rgba(0,0,0,.5)"}}>
+        <div style={{fontSize:15,fontWeight:700,color:"#f1f5f9",marginBottom:6}}>Iniciar Sesión</div>
+        <div style={{fontSize:12,color:"#64748b",marginBottom:24}}>Ingrese sus credenciales para acceder</div>
+
+        <div style={{marginBottom:16}}>
+          <label style={{fontSize:10,fontWeight:700,color:"#94a3b8",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Usuario</label>
+          <input className="login-inp" value={loginUser} onChange={e=>setLoginUser(e.target.value)} placeholder="Ej: instalador, gerente, admin" autoFocus/>
+        </div>
+
+        <div style={{marginBottom:24}}>
+          <label style={{fontSize:10,fontWeight:700,color:"#94a3b8",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Contraseña</label>
+          <input className="login-inp" type="password" value={loginPw} onChange={e=>setLoginPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&doLogin()}/>
+        </div>
+
+        {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:16,padding:"10px 14px",background:"rgba(239,68,68,.1)",borderRadius:10,border:"1px solid rgba(239,68,68,.2)",textAlign:"center"}}>{loginErr}</div>}
+
+        <button className="login-btn" onClick={doLogin} style={{background:"linear-gradient(135deg,#d97706,#b45309)",color:"#fff",boxShadow:"0 4px 20px rgba(217,119,6,.3)",marginBottom:16}}
+          onMouseEnter={e=>{e.target.style.transform="translateY(-2px)";e.target.style.boxShadow="0 8px 30px rgba(217,119,6,.4)"}}
+          onMouseLeave={e=>{e.target.style.transform="translateY(0)";e.target.style.boxShadow="0 4px 20px rgba(217,119,6,.3)"}}>
+          Ingresar al Sistema
+        </button>
+
+        <div style={{fontSize:10,color:"#334155",textAlign:"center",lineHeight:1.7,marginTop:8}}>
+          Sistema exclusivo para personal autorizado de Grupo FPC
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div style={{textAlign:"center",marginTop:24}}>
+        <div style={{fontSize:10,color:"#1e293b"}}>FPC Soluciones Decorativas © {new Date().getFullYear()}</div>
+      </div>
     </div>
   </div>;
 
@@ -359,21 +424,20 @@ export default function App(){
 
     {/* SIDEBAR */}
     <div className="dsk" style={SB}>
-      <div style={{padding:"24px 20px 20px"}}>
-        <div style={{fontSize:10,fontWeight:800,letterSpacing:4,color:"#3b82f6",marginBottom:2}}>GRUPO FPC</div>
-        <div style={{fontSize:15,fontWeight:800,color:"#f1f5f9",lineHeight:1.2}}>Control de<br/>Instalaciones</div>
+      <div style={{padding:"20px 16px 16px",textAlign:"center",borderBottom:"1px solid rgba(30,48,72,.3)"}}>
+        <img src="/logo-fpc.png" alt="FPC" style={{width:60,height:60,objectFit:"contain",marginBottom:8,opacity:.85}}/>
+        <div style={{fontSize:9,fontWeight:700,letterSpacing:3,color:"#d97706",marginBottom:2}}>SOLUCIONES DECORATIVAS</div>
+        <div style={{fontSize:12,fontWeight:800,color:"#f1f5f9",lineHeight:1.2}}>Control de Instalaciones</div>
       </div>
-      <div style={{padding:"0 10px",flex:1,overflowY:"auto"}}>
+      <div style={{padding:"8px 10px",flex:1,overflowY:"auto"}}>
         {visTabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:"none",background:tab===t.id?"rgba(37,99,235,.12)":"transparent",color:tab===t.id?"#60a5fa":"#64748b",fontSize:12.5,fontWeight:tab===t.id?700:500,cursor:"pointer",marginBottom:2,textAlign:"left",fontFamily:"inherit"}}>
           <span style={{width:20,textAlign:"center",fontSize:13,opacity:.7}}>{t.ic}</span>{t.l}
           {t.money&&<span style={{marginLeft:"auto",fontSize:9,background:"rgba(245,158,11,.15)",color:"#fbbf24",padding:"2px 6px",borderRadius:99}}>🔒</span>}
         </button>)}
       </div>
       <div style={{padding:"14px 14px",borderTop:"1px solid rgba(30,48,72,.4)"}}>
-        {user?<div>
-          <div style={{fontSize:11,color:"#34d399",fontWeight:600,marginBottom:4}}>● {user.name}</div>
-          <button onClick={()=>{setUser(null);setTab("dash")}} style={{width:"100%",padding:"6px 10px",borderRadius:8,border:"1px solid rgba(51,65,85,.4)",background:"transparent",color:"#64748b",fontSize:11,cursor:"pointer"}}>Cerrar sesión</button>
-        </div>:<button onClick={()=>setLoginOpen(true)} style={{width:"100%",padding:"10px 12px",borderRadius:10,border:"1px dashed rgba(51,65,85,.5)",background:"transparent",color:"#475569",fontSize:12,cursor:"pointer"}}>🔐 Iniciar Sesión</button>}
+        <div style={{fontSize:11,color:"#34d399",fontWeight:600,marginBottom:4}}>● {user.name}</div>
+        <button onClick={()=>{setUser(null);setLoginUser("");setLoginPw("");setLoginErr("")}} style={{width:"100%",padding:"6px 10px",borderRadius:8,border:"1px solid rgba(51,65,85,.4)",background:"transparent",color:"#64748b",fontSize:11,cursor:"pointer"}}>Cerrar sesión</button>
         <div style={{fontSize:9,color:"#334155",marginTop:8}}>{recs.length} reg · {inst.length} inst · {ayud.length} ayud</div>
       </div>
     </div>
@@ -384,36 +448,6 @@ export default function App(){
       <div style={{...SB,position:"relative",zIndex:1,width:270}}>
         <div style={{padding:"20px 16px"}}><div style={{fontSize:10,fontWeight:800,letterSpacing:4,color:"#3b82f6"}}>GRUPO FPC</div><div style={{fontSize:14,fontWeight:800,color:"#f1f5f9"}}>Control Instalaciones</div></div>
         <div style={{padding:"0 8px",flex:1,overflow:"auto"}}>{visTabs.map(t=><button key={t.id} onClick={()=>{setTab(t.id);setMob(false)}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:10,border:"none",background:tab===t.id?"rgba(37,99,235,.12)":"transparent",color:tab===t.id?"#60a5fa":"#64748b",fontSize:13,fontWeight:tab===t.id?700:500,cursor:"pointer",textAlign:"left"}}><span style={{width:20,textAlign:"center"}}>{t.ic}</span>{t.l}</button>)}</div>
-      </div>
-    </div>}
-
-    {/* LOGIN MODAL */}
-    {loginOpen&&<div className="modalBg" onClick={()=>{setLoginOpen(false);setLoginErr("")}}>
-      <div className="card" style={{padding:0,width:420,maxWidth:"95vw"}} onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"24px 28px 0"}}>
-          <div style={{fontSize:10,fontWeight:800,letterSpacing:3,color:"#3b82f6",marginBottom:4}}>GRUPO FPC</div>
-          <div style={{fontSize:18,fontWeight:800,color:"#f1f5f9",marginBottom:4}}>Iniciar Sesión</div>
-          <div style={{fontSize:12,color:"#64748b",marginBottom:20}}>Ingrese sus credenciales</div>
-        </div>
-        <div style={{padding:"0 28px 24px"}}>
-          <div style={{marginBottom:12}}><label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Usuario</label>
-            <input className="inp" value={loginUser} onChange={e=>setLoginUser(e.target.value)} placeholder="instalador, ayudante, diana, gerente, admin" autoFocus/></div>
-          <div style={{marginBottom:16}}><label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Contraseña</label>
-            <input className="inp" type="password" value={loginPw} onChange={e=>setLoginPw(e.target.value)} placeholder="••••••••" onKeyDown={e=>e.key==="Enter"&&doLogin()}/></div>
-          {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:12,padding:"8px 12px",background:"rgba(239,68,68,.1)",borderRadius:8}}>{loginErr}</div>}
-          <div style={{display:"flex",gap:10,marginBottom:14}}>
-            <button className="btn bp" onClick={doLogin} style={{flex:1}}>Ingresar</button>
-            <button className="btn bg" onClick={()=>{setLoginOpen(false);setLoginErr("")}}>Cancelar</button>
-          </div>
-          <div style={{fontSize:10,color:"#475569",padding:"10px 12px",background:"rgba(15,23,42,.5)",borderRadius:8,lineHeight:1.7}}>
-            <div style={{fontWeight:700,color:"#64748b",marginBottom:4}}>Usuarios disponibles:</div>
-            • <b>instalador</b> / fpc123 — vista dashboard (todos los instaladores)<br/>
-            • <b>ayudante</b> / fpc123 — vista dashboard (todos los ayudantes)<br/>
-            • <b>diana</b> / diana2026 — asistente (sin dinero)<br/>
-            • <b>gerente</b> / gerente2026 — acceso completo<br/>
-            • <b>admin</b> / fpc2026 — administrador
-          </div>
-        </div>
       </div>
     </div>}
 
@@ -431,8 +465,7 @@ export default function App(){
       <div style={{background:"rgba(8,13,25,.9)",borderBottom:"1px solid rgba(30,48,72,.4)",padding:"10px 24px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:50}}>
         <button className="mbb" onClick={()=>setMob(true)} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:20,padding:4}}>☰</button>
         <div style={{flex:1}}/>
-        {user&&<span style={{fontSize:11,color:"#34d399",background:"rgba(5,150,105,.1)",padding:"4px 12px",borderRadius:99,border:"1px solid rgba(5,150,105,.2)",fontWeight:600}}>● {user.name}</span>}
-        {!user&&<button onClick={()=>setLoginOpen(true)} style={{fontSize:11,color:"#64748b",background:"transparent",border:"1px solid rgba(51,65,85,.4)",padding:"4px 12px",borderRadius:99,cursor:"pointer"}}>🔐 Iniciar Sesión</button>}
+        <span style={{fontSize:11,color:"#34d399",background:"rgba(5,150,105,.1)",padding:"4px 12px",borderRadius:99,border:"1px solid rgba(5,150,105,.2)",fontWeight:600}}>● {user.name}</span>
         <span style={{fontSize:11,color:"#334155"}}>{new Date().toLocaleDateString("es-GT",{day:"numeric",month:"long",year:"numeric"})}</span>
       </div>
 
