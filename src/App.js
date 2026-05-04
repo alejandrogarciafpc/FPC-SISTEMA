@@ -273,20 +273,24 @@ export default function App(){
   const svSA = useCallback(async v=>{setScoresA(v); await DB.set("fpc11-sa",v)},[]);
 
   // Resumen por instalador (por nombre, ya que el record guarda nombre)
+  // Solo registros habilitados para cálculos de pago
+  const activeRecs = useMemo(()=>recs.filter(r=>!r.disabled),[recs]);
+
   const bI = useMemo(()=>{
     const m={};
-    recs.forEach(r=>{
+    activeRecs.forEach(r=>{
+      if(!r.i||r.i==="—") return;
       if(!m[r.i]) m[r.i]={mt:0,pi:0,pa:0,n:0,pr:{}};
       m[r.i].mt+=r.ml||0; m[r.i].pi+=r.pi||0; m[r.i].pa+=r.pa||0; m[r.i].n+=1;
       if(!m[r.i].pr[r.p]) m[r.i].pr[r.p]={mt:0,pi:0,pa:0,n:0};
       m[r.i].pr[r.p].mt+=r.ml||0; m[r.i].pr[r.p].pi+=r.pi||0; m[r.i].pr[r.p].pa+=r.pa||0; m[r.i].pr[r.p].n+=1;
     });
     return m;
-  },[recs]);
+  },[activeRecs]);
 
   const bA = useMemo(()=>{
     const m={};
-    recs.forEach(r=>{
+    activeRecs.forEach(r=>{
       if(r.a && r.a!=="—"){
         if(!m[r.a]) m[r.a]={mt:0,pa:0,n:0,pr:{}};
         m[r.a].mt+=r.ml||0; m[r.a].pa+=r.pa||0; m[r.a].n+=1;
@@ -301,16 +305,16 @@ export default function App(){
       }
     });
     return m;
-  },[recs]);
+  },[activeRecs]);
 
   const bP = useMemo(()=>{
     const m={};
-    recs.forEach(r=>{
+    activeRecs.forEach(r=>{
       if(!m[r.p]) m[r.p]={mt:0,pi:0,pa:0,n:0};
       m[r.p].mt+=r.ml||0; m[r.p].pi+=r.pi||0; m[r.p].pa+=r.pa||0; m[r.p].n+=1;
     });
     return m;
-  },[recs]);
+  },[activeRecs]);
 
   const tMt = Object.values(bI).reduce((s,v)=>s+v.mt,0);
   const tPI = Object.values(bI).reduce((s,v)=>s+v.pi,0);
@@ -506,7 +510,7 @@ export default function App(){
         {tab==="ing"  && !publicOnly && <IngV inst={inst} ayud={ayud} svI={svI} svA={svA} recs={recs} svR={svR} canEdit={canEdit} user={user}/>}
         {tab==="ri"   && !publicOnly && <ResumenV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} cm={canMoney}/>}
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
-        {tab==="sc"   && !publicOnly && <SCV inst={inst} ayud={ayud} scores={scores} svS={svS} scoresA={scoresA} svSA={svSA} bI={bI} bA={bA} canEdit={canEdit}/>}
+        {tab==="sc"   && !publicOnly && <SCV inst={inst} ayud={ayud} scores={scores} svS={svS} scoresA={scoresA} svSA={svSA} bI={bI} bA={bA} canEdit={canEdit} recs={recs} svR={svR}/>}
         {tab==="adm"  && !publicOnly && <AdminV inst={inst} svI={svI} ayud={ayud} svA={svA} canEdit={canEdit} scores={scores} scoresA={scoresA}/>}
         {tab==="rep"  && canMoney && <ReportV inst={inst} ayud={ayud} recs={recs}/>}
         {tab==="tb"   && !publicOnly && <TBV/>}
@@ -654,6 +658,13 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
   const [cot,setCot]=useState(""); const [cli,setCli]=useState(""); const [msg,setMsg]=useState("");
   const [addI,setAddI]=useState(false); const [addA,setAddA]=useState(false);
   const [newName,setNewName]=useState(""); const [newCat,setNewCat]=useState("B");
+  const [buscar,setBuscar]=useState("");
+
+  const filteredRecs = useMemo(()=>{
+    if(!buscar.trim()) return recs;
+    const q = buscar.trim().toLowerCase();
+    return recs.filter(r=> (r.co&&r.co.toLowerCase().includes(q)) || (r.cl&&r.cl.toLowerCase().includes(q)) || (r.i&&r.i.toLowerCase().includes(q)) || (r.a&&r.a.toLowerCase().includes(q)));
+  },[recs,buscar]);
 
   const tI = aI.find(x=>x.name===selI);
   const tA = aA.find(x=>x.name===selA);
@@ -769,12 +780,20 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
     </div>
 
     <div className="card">
-      <div className="card-h" style={{justifyContent:"space-between"}}><span><span style={{color:"#64748b"}}>▤</span> Registros ({recs.length})</span>
-        {recs.length>0&&canEdit&&<button className="btn bg" style={{fontSize:11,padding:"5px 12px"}} onClick={()=>{if(window.confirm("¿Eliminar TODOS los registros?"))svR([])}}>Limpiar todo</button>}</div>
+      <div className="card-h" style={{justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+        <span><span style={{color:"#64748b"}}>▤</span> Registros ({recs.length})</span>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input className="inp" value={buscar} onChange={e=>setBuscar(e.target.value)} placeholder="🔍 Buscar cotización o cliente..." style={{width:260,fontSize:12,padding:"7px 12px"}}/>
+          {recs.length>0&&canEdit&&<button className="btn bg" style={{fontSize:11,padding:"5px 12px"}} onClick={()=>{if(window.confirm("¿Eliminar TODOS los registros?"))svR([])}}>Limpiar todo</button>}
+        </div>
+      </div>
       <div style={{overflowX:"auto",maxHeight:480}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>
           {["Fecha","Cot","Cliente","Instalador","Ayudante 1","Ayudante 2","Producto","Mts",""].map(h=><th key={h} className="th" style={h==="Mts"?{textAlign:"right"}:{}}>{h}</th>)}
-        </tr></thead><tbody>{recs.slice(0,30).map(r=><tr key={r.id}>
+        </tr></thead><tbody>{filteredRecs.slice(0,50).map(r=>{
+          const dis = r.disabled;
+          const rowStyle = dis ? {opacity:.45,textDecoration:"line-through"} : {};
+          return <tr key={r.id} style={rowStyle}>
           <td className="td" style={{color:"#475569"}}>{r.dt}</td>
           <td className="td" style={{color:"#64748b"}}>{r.co||"—"}</td>
           <td className="td" style={{maxWidth:140,overflow:"hidden",textOverflow:"ellipsis"}}>{r.cl||"—"}</td>
@@ -783,9 +802,12 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
           <td className="td" style={{color:"#94a3b8"}}>{r.a2||"—"}</td>
           <td className="td" style={{color:"#60a5fa",fontWeight:600}}>{r.p}</td>
           <td className="td" style={{textAlign:"right",fontWeight:800,fontSize:13}}>{N(r.ml)}</td>
-          <td className="td">{canEdit&&<button style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14}} onClick={()=>svR(recs.filter(x=>x.id!==r.id))}>✕</button>}</td>
-        </tr>)}</tbody></table>
-        {!recs.length&&<div style={{padding:40,textAlign:"center",color:"#334155",fontSize:13}}>Sin registros</div>}
+          <td className="td" style={{whiteSpace:"nowrap"}}>{canEdit&&<>
+            <button style={{background:"none",border:"none",color:dis?"#10b981":"#f59e0b",cursor:"pointer",fontSize:14,marginRight:4}} onClick={()=>svR(recs.map(x=>x.id===r.id?{...x,disabled:!x.disabled}:x))} title={dis?"Habilitar para pago":"Inhabilitar — no suma a pago"}>{dis?"✅":"🚫"}</button>
+            <button style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14}} onClick={()=>svR(recs.filter(x=>x.id!==r.id))} title="Eliminar">✕</button>
+          </>}</td>
+        </tr>})}</tbody></table>
+        {!filteredRecs.length&&<div style={{padding:40,textAlign:"center",color:"#334155",fontSize:13}}>{buscar?"No se encontraron resultados para '"+buscar+"'":"Sin registros"}</div>}
       </div>
     </div>
   </div>;
@@ -986,7 +1008,7 @@ function RPV({bP,cm}){
 // SCORECARD — Instaladores y Ayudantes con eventos documentados
 // Cada criterio cuenta puede registrar EVENTOS con fecha/coti/cliente/descripción
 // ═══════════════════════════════════════════════════════════
-function SCV({inst,ayud,scores,svS,scoresA,svSA,bI,bA,canEdit}){
+function SCV({inst,ayud,scores,svS,scoresA,svSA,bI,bA,canEdit,recs,svR}){
   const [sub,setSub]=useState("inst");
   const list = sub==="inst"?inst:ayud;
   const sd = sub==="inst"?scores:scoresA;
@@ -1000,11 +1022,11 @@ function SCV({inst,ayud,scores,svS,scoresA,svSA,bI,bA,canEdit}){
       <button className={`pill ${sub==="inst"?"on":""}`} onClick={()=>setSub("inst")}>◈ Instaladores</button>
       <button className={`pill ${sub==="ayud"?"on":""}`} onClick={()=>setSub("ayud")}>◇ Ayudantes</button>
     </div>
-    <SCEditor list={list.filter(t=>t.on)} sd={sd} svSd={sv} summary={summary} canEdit={canEdit} kind={sub}/>
+    <SCEditor list={list.filter(t=>t.on)} sd={sd} svSd={sv} summary={summary} canEdit={canEdit} kind={sub} recs={recs} svR={svR}/>
   </div>;
 }
 
-function SCEditor({list,sd,svSd,summary,canEdit,kind}){
+function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR}){
   const [sel,setSel] = useState("");
   const tm = list.find(t=>t.id===sel);
   const ov = sel ? getScore(sd, sel, list) : null;
@@ -1038,10 +1060,25 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind}){
     } else {
       curObj = {value: typeof cur === "number"?cur:0, events: []};
     }
-    const newEvents = [...(curObj.events||[]), {date:evtDate,coti:evtCoti.trim(),cliente:evtCli.trim(),descripcion:evtDesc.trim()}];
-    // Si es criterio "cnt" (contador de errores), incrementar value automáticamente
-    const newValue = evtCrit.cnt ? newEvents.length : curObj.value;
+    const coti = evtCoti.trim();
+    const newEvents = [...(curObj.events||[]), {date:evtDate,coti,cliente:evtCli.trim(),descripcion:evtDesc.trim()}];
+    const newValue = newEvents.length;
     svSd({...sd, [sel]: {...(sd[sel]||{}), [evtCrit.id]: {value:newValue, events:newEvents}}});
+
+    // Auto-inhabilitar registros con esa cotización si la cotización fue ingresada
+    if(coti && coti!=="01" && svR && recs){
+      const personName = list.find(t=>t.id===sel)?.name;
+      if(personName){
+        const updated = recs.map(r=>{
+          if(r.co && r.co.toLowerCase()===coti.toLowerCase() && (r.i===personName||r.a===personName)){
+            return {...r, disabled:true, disabledReason: evtCrit.l};
+          }
+          return r;
+        });
+        if(JSON.stringify(updated)!==JSON.stringify(recs)) svR(updated);
+      }
+    }
+
     setEvtCrit(null); setEvtCoti(""); setEvtCli(""); setEvtDesc(""); setEvtDate(today());
   }
 
