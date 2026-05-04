@@ -152,8 +152,12 @@ function getScore(sd, tid, list){
     const v = getCritValue(sd,tid,c.id);
     if(v===undefined) return;
     const mx = t.cat==="A"?c.A:c.B;
-    // Todos los criterios son por conteo de eventos (faltas)
-    tot += v<=mx ? 100 : Math.max(0, 100-((v-mx)*25));
+    // 0 eventos = 100 puntos (perfecto)
+    // Cada evento resta 25 puntos
+    // Exceder el límite resta 25 adicionales por cada uno sobre el límite
+    if(v === 0) { tot += 100; }
+    else if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
+    else { tot += Math.max(0, 100 - (mx * 25) - ((v - mx) * 25)); }
     cnt++;
   });
   return cnt ? Math.round(tot/cnt) : null;
