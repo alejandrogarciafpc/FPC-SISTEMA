@@ -1026,22 +1026,55 @@ function SCV({inst,ayud,scores,svS,scoresA,svSA,bI,bA,canEdit,recs,svR}){
       <button className={`pill ${sub==="inst"?"on":""}`} onClick={()=>setSub("inst")}>◈ Instaladores</button>
       <button className={`pill ${sub==="ayud"?"on":""}`} onClick={()=>setSub("ayud")}>◇ Ayudantes</button>
     </div>
-    <SCEditor list={list.filter(t=>t.on)} sd={sd} svSd={sv} summary={summary} canEdit={canEdit} kind={sub} recs={recs} svR={svR}/>
+    <SCEditor list={list.filter(t=>t.on)} sd={sd} svSd={sv} summary={summary} canEdit={canEdit} kind={sub} recs={recs} svR={svR} allInst={inst} allAyud={ayud} scoresA={scoresA} svSA={svSA} scores={scores} svS={svS}/>
   </div>;
 }
 
-function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR}){
+function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,scoresA,svSA,scores,svS}){
   const [sel,setSel] = useState("");
   const tm = list.find(t=>t.id===sel);
   const ov = sel ? getScore(sd, sel, list) : null;
   const oc = ov===null?"#475569":ov>=85?"#10b981":ov>=60?"#f59e0b":"#ef4444";
 
   // Estado para form de evento nuevo
-  const [evtCrit,setEvtCrit] = useState(null); // crit object
+  const [evtCrit,setEvtCrit] = useState(null);
+  const [evtMode,setEvtMode] = useState("select"); // "select" = elegir de historial, "manual" = llenar a mano
   const [evtDate,setEvtDate] = useState(today());
   const [evtCoti,setEvtCoti] = useState("");
   const [evtCli,setEvtCli] = useState("");
   const [evtDesc,setEvtDesc] = useState("");
+  const [evtAlsoAyud,setEvtAlsoAyud] = useState(true); // también afectar al ayudante
+  const [evtAyudName,setEvtAyudName] = useState(""); // nombre del ayudante vinculado
+
+  // Cotizaciones únicas de este técnico (del historial de registros)
+  const personCotis = useMemo(()=>{
+    if(!tm || !recs) return [];
+    const name = tm.name;
+    const cotis = {};
+    recs.forEach(r=>{
+      if(r.co && r.co!=="01" && r.co!=="—" && (r.i===name || r.a===name || r.a2===name)){
+        if(!cotis[r.co]) cotis[r.co] = {coti:r.co, cliente:r.cl||"", fecha:r.dt, ayud:r.a||"—", ayud2:r.a2||"—", inst:r.i||"—"};
+      }
+    });
+    return Object.values(cotis).sort((a,b)=>(b.fecha||"").localeCompare(a.fecha||""));
+  },[tm,recs]);
+
+  function selectCoti(cotiObj){
+    setEvtCoti(cotiObj.coti);
+    setEvtCli(cotiObj.cliente);
+    setEvtDate(cotiObj.fecha || today());
+    // Determinar el ayudante vinculado
+    const name = tm?.name;
+    if(kind==="inst"){
+      // Si estamos evaluando un instalador, el ayudante es el que trabajó con él
+      const ay = cotiObj.ayud!=="—" ? cotiObj.ayud : "";
+      setEvtAyudName(ay);
+    } else {
+      // Si estamos evaluando un ayudante, el instalador ya se sabe
+      setEvtAyudName("");
+    }
+    setEvtAlsoAyud(true);
+  }
 
   function setRawValue(cid, val){
     if(!canEdit||!sel) return;
@@ -1059,22 +1092,34 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR}){
     if(!canEdit||!sel||!evtCrit) return;
     const cur = sd[sel]?.[evtCrit.id];
     let curObj;
-    if(typeof cur === "object" && cur !== null){
-      curObj = cur;
-    } else {
-      curObj = {value: typeof cur === "number"?cur:0, events: []};
-    }
+    if(typeof cur === "object" && cur !== null){ curObj = cur; }
+    else { curObj = {value: typeof cur === "number"?cur:0, events: []}; }
+
     const coti = evtCoti.trim();
-    const newEvents = [...(curObj.events||[]), {date:evtDate,coti,cliente:evtCli.trim(),descripcion:evtDesc.trim()}];
+    const eventData = {date:evtDate,coti,cliente:evtCli.trim(),descripcion:evtDesc.trim()};
+    const newEvents = [...(curObj.events||[]), eventData];
     const newValue = newEvents.length;
     svSd({...sd, [sel]: {...(sd[sel]||{}), [evtCrit.id]: {value:newValue, events:newEvents}}});
 
-    // Auto-inhabilitar registros con esa cotización si la cotización fue ingresada
+    // También afectar al ayudante si está marcado
+    if(evtAlsoAyud && evtAyudName && kind==="inst" && allAyud && svSA && scoresA){
+      const ayPerson = allAyud.find(a=>a.name===evtAyudName);
+      if(ayPerson){
+        const ayCur = scoresA[ayPerson.id]?.[evtCrit.id];
+        let ayCurObj;
+        if(typeof ayCur === "object" && ayCur !== null){ ayCurObj = ayCur; }
+        else { ayCurObj = {value: typeof ayCur === "number"?ayCur:0, events: []}; }
+        const ayNewEvents = [...(ayCurObj.events||[]), eventData];
+        svSA({...scoresA, [ayPerson.id]: {...(scoresA[ayPerson.id]||{}), [evtCrit.id]: {value:ayNewEvents.length, events:ayNewEvents}}});
+      }
+    }
+
+    // Auto-inhabilitar registros con esa cotización
     if(coti && coti!=="01" && svR && recs){
-      const personName = list.find(t=>t.id===sel)?.name;
+      const personName = tm?.name;
       if(personName){
         const updated = recs.map(r=>{
-          if(r.co && r.co.toLowerCase()===coti.toLowerCase() && (r.i===personName||r.a===personName)){
+          if(r.co && r.co.toLowerCase()===coti.toLowerCase() && (r.i===personName||r.a===personName||r.a2===personName)){
             return {...r, disabled:true, disabledReason: evtCrit.l};
           }
           return r;
@@ -1083,7 +1128,7 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR}){
       }
     }
 
-    setEvtCrit(null); setEvtCoti(""); setEvtCli(""); setEvtDesc(""); setEvtDate(today());
+    setEvtCrit(null); setEvtCoti(""); setEvtCli(""); setEvtDesc(""); setEvtDate(today()); setEvtAyudName(""); setEvtAlsoAyud(true); setEvtMode("select");
   }
 
   function removeEvent(cid, idx){
@@ -1091,9 +1136,7 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR}){
     const cur = sd[sel]?.[cid];
     if(!cur || typeof cur !== "object") return;
     const newEvents = (cur.events||[]).filter((_,i)=>i!==idx);
-    const crit = CRIT.find(c=>c.id===cid);
-    const newValue = crit?.cnt ? newEvents.length : cur.value;
-    svSd({...sd, [sel]: {...(sd[sel]||{}), [cid]: {value:newValue, events:newEvents}}});
+    svSd({...sd, [sel]: {...(sd[sel]||{}), [cid]: {value:newEvents.length, events:newEvents}}});
   }
 
   return <div>
@@ -1172,31 +1215,74 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR}){
     </div>:<div style={{padding:50,textAlign:"center",color:"#334155"}}><div style={{fontSize:40,marginBottom:10}}>◎</div><div style={{fontSize:14}}>Seleccione un {kind==="inst"?"instalador":"ayudante"} arriba</div></div>}
 
     {/* MODAL DOCUMENTAR EVENTO */}
-    {evtCrit && <div className="modalBg" onClick={()=>setEvtCrit(null)}>
-      <div className="card" style={{padding:0,width:520,maxWidth:"95vw"}} onClick={e=>e.stopPropagation()}>
+    {evtCrit && <div className="modalBg" onClick={()=>{setEvtCrit(null);setEvtMode("select")}}>
+      <div className="card" style={{padding:0,width:580,maxWidth:"95vw",maxHeight:"90vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:"20px 24px",borderBottom:"1px solid rgba(30,48,72,.5)"}}>
           <div style={{fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:1.5,marginBottom:4}}>Documentar evento</div>
           <div style={{fontSize:17,fontWeight:800,color:"#f1f5f9"}}>{evtCrit.l}</div>
-          <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{tm?.name}</div>
+          <div style={{fontSize:12,color:"#64748b",marginTop:2}}>{tm?.name} ({kind==="inst"?"Instalador":"Ayudante"})</div>
         </div>
         <div style={{padding:"20px 24px"}}>
+
+          {/* Selector de modo */}
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            <button className={`pill ${evtMode==="select"?"on":""}`} onClick={()=>setEvtMode("select")}>📋 Seleccionar de cotizaciones</button>
+            <button className={`pill ${evtMode==="manual"?"on":""}`} onClick={()=>setEvtMode("manual")}>✎ Llenar manualmente</button>
+          </div>
+
+          {/* Modo: seleccionar de historial de cotizaciones */}
+          {evtMode==="select" && <div style={{marginBottom:14}}>
+            <label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Cotizaciones de {tm?.name}</label>
+            {personCotis.length>0 ? <div style={{maxHeight:180,overflowY:"auto",borderRadius:10,border:"1px solid rgba(51,65,85,.4)"}}>
+              {personCotis.map((c,i)=><button key={i} onClick={()=>selectCoti(c)} style={{width:"100%",padding:"10px 14px",border:"none",borderBottom:"1px solid rgba(30,48,72,.3)",background:evtCoti===c.coti?"rgba(37,99,235,.12)":"transparent",color:"#e2e8f0",fontSize:12,cursor:"pointer",textAlign:"left",display:"flex",gap:12,alignItems:"center",fontFamily:"inherit"}}>
+                <span style={{fontWeight:700,color:"#60a5fa",minWidth:100}}>{c.coti}</span>
+                <span style={{flex:1,color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.cliente}</span>
+                <span style={{color:"#475569",fontSize:10}}>{c.fecha}</span>
+                {evtCoti===c.coti&&<span style={{color:"#10b981"}}>✓</span>}
+              </button>)}
+            </div> : <div style={{padding:14,textAlign:"center",color:"#475569",fontSize:12,background:"rgba(15,23,42,.4)",borderRadius:10}}>No hay cotizaciones registradas para {tm?.name}. Use la opción manual.</div>}
+          </div>}
+
+          {/* Campos de fecha y cotización */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
             <div><label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Fecha *</label>
               <input className="inp" type="date" value={evtDate} onChange={e=>setEvtDate(e.target.value)}/></div>
             <div><label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Cotización</label>
               <input className="inp" value={evtCoti} onChange={e=>setEvtCoti(e.target.value)} placeholder="C02SA7830"/></div>
           </div>
+
+          {/* Cliente */}
           <div style={{marginBottom:12}}>
             <label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Cliente</label>
             <input className="inp" value={evtCli} onChange={e=>setEvtCli(e.target.value)} placeholder="Nombre del cliente"/>
           </div>
+
+          {/* Ayudante vinculado — solo para instaladores */}
+          {kind==="inst" && <div style={{marginBottom:14,padding:"12px 14px",background:"rgba(15,23,42,.4)",borderRadius:10,border:"1px solid rgba(51,65,85,.3)"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#64748b",textTransform:"uppercase",marginBottom:8}}>Ayudante vinculado</div>
+            {evtAyudName ? <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:"#e2e8f0",flex:1}}>
+                <input type="checkbox" checked={evtAlsoAyud} onChange={e=>setEvtAlsoAyud(e.target.checked)} style={{width:18,height:18,accentColor:"#3b82f6"}}/>
+                También aplicar este evento a <b style={{color:"#a78bfa"}}>{evtAyudName}</b>
+              </label>
+              <button className="btn bg" style={{padding:"4px 10px",fontSize:10}} onClick={()=>setEvtAyudName("")}>Quitar</button>
+            </div> : <div>
+              <select className="sel" value={evtAyudName} onChange={e=>setEvtAyudName(e.target.value)} style={{fontSize:12}}>
+                <option value="">— Sin ayudante (no afectar a nadie más) —</option>
+                {(allAyud||[]).filter(a=>a.on).map(a=><option key={a.id} value={a.name}>{a.name}</option>)}
+              </select>
+            </div>}
+          </div>}
+
+          {/* Descripción */}
           <div style={{marginBottom:16}}>
             <label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Descripción del evento</label>
-            <textarea className="txa" value={evtDesc} onChange={e=>setEvtDesc(e.target.value)} placeholder="¿Qué pasó? Ej: Error de medición en cortina, faltaron 5cm de ancho. Tuvo que reprogramarse."/>
+            <textarea className="txa" value={evtDesc} onChange={e=>setEvtDesc(e.target.value)} placeholder="¿Qué pasó? Ej: Error de medición en cortina, faltaron 5cm de ancho."/>
           </div>
+
           <div style={{display:"flex",gap:10}}>
             <button className="btn bs" onClick={addEvent} style={{flex:1}}>✓ Registrar Evento</button>
-            <button className="btn bg" onClick={()=>setEvtCrit(null)}>Cancelar</button>
+            <button className="btn bg" onClick={()=>{setEvtCrit(null);setEvtMode("select")}}>Cancelar</button>
           </div>
         </div>
       </div>
