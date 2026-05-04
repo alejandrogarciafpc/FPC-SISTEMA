@@ -333,29 +333,30 @@ export default function App(){
     if(u && u.pw===loginPw){
       setUser({...u,uid:loginUser.toLowerCase().trim()});
       setLoginOpen(false); setLoginUser(""); setLoginPw(""); setLoginErr("");
-      setTab("dash");
+      setTab(u.publicOnly ? "dsc" : "dash");
     } else setLoginErr("Usuario o contraseña incorrectos");
   }
 
   const TABS = [
-    {id:"dash",ic:"◻",l:"Dashboard"},
+    {id:"dash",ic:"📊",l:"Dashboard Ejecutivo"},
+    {id:"dsc", ic:"◎",l:"Dashboard Scorecard",publicAlso:true},
     {id:"ing", ic:"✎",l:"Ingreso de Metros",edit:true},
     {id:"ri",  ic:"◈",l:"Resumen"},
     {id:"rp",  ic:"▤",l:"Resumen Producto"},
     {id:"sc",  ic:"◎",l:"Scorecard",edit:true},
-    {id:"rep", ic:"📊",l:"Reportes Mensuales",money:true},
+    {id:"rep", ic:"📄",l:"Reportes Mensuales",money:true},
     {id:"adm", ic:"⚙",l:"Administración Personal",edit:true},
     {id:"tb",  ic:"▦",l:"Tablas de Pago"},
     {id:"pg",  ic:"$",l:"Pagos & Incentivos",money:true},
   ];
   const visTabs = TABS.filter(t=>{
-    if(publicOnly) return t.id==="dash"; // solo dashboard
+    if(publicOnly) return t.publicAlso;
     if(t.money) return canMoney;
     if(t.edit) return canEdit || !user;
     return true;
   });
 
-  useEffect(()=>{ if(publicOnly && tab!=="dash") setTab("dash") },[publicOnly,tab]);
+  useEffect(()=>{ if(publicOnly && tab!=="dsc") setTab("dsc") },[publicOnly,tab]);
 
   // ─── PANTALLA DE CARGA ───
   if(!ok) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#020617 0%,#0a1628 40%,#0f172a 100%)",fontFamily:"'Inter',system-ui,sans-serif"}}>
@@ -510,7 +511,8 @@ export default function App(){
       </div>
 
       <div style={{padding:"24px 28px",maxWidth:1440,margin:"0 auto"}} className="fu">
-        {tab==="dash" && <DashV inst={inst} ayud={ayud} bI={bI} bA={bA} bP={bP} tMt={tMt} tN={recs.length} cm={canMoney} tPI={tPI} tPA={tPA} scores={scores} scoresA={scoresA} publicOnly={publicOnly} onPersonClick={(kind,person)=>setDetailPerson({kind,person})}/>}
+        {tab==="dash" && !publicOnly && <DashExecV inst={inst} ayud={ayud} recs={recs} scores={scores} scoresA={scoresA} cm={canMoney}/>}
+        {tab==="dsc"  && <DashScoreV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} scores={scores} scoresA={scoresA} publicOnly={publicOnly} onPersonClick={(kind,person)=>setDetailPerson({kind,person})}/>}
         {tab==="ing"  && !publicOnly && <IngV inst={inst} ayud={ayud} svI={svI} svA={svA} recs={recs} svR={svR} canEdit={canEdit} user={user}/>}
         {tab==="ri"   && !publicOnly && <ResumenV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} cm={canMoney}/>}
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
@@ -596,35 +598,157 @@ function PersonDetailModal({kind,person,scores,bData,onClose}){
 // ═══════════════════════════════════════════════════════════
 // DASHBOARD — con scorecards grandes de instaladores y ayudantes
 // ═══════════════════════════════════════════════════════════
-function DashV({inst,ayud,bI,bA,bP,tMt,tN,cm,tPI,tPA,scores,scoresA,publicOnly,onPersonClick}){
-  const cA=inst.filter(t=>t.cat==="A"&&t.on).length;
-  const cB=inst.filter(t=>t.cat==="B"&&t.on).length;
-  const topI=Object.entries(bI).sort((a,b)=>b[1].mt-a[1].mt).slice(0,8);
-  const topP=Object.entries(bP).sort((a,b)=>b[1].mt-a[1].mt).slice(0,10);
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD EJECUTIVO — reportería completa con calendario mensual
+// ═══════════════════════════════════════════════════════════
+function DashExecV({inst,ayud,recs,scores,scoresA,cm}){
+  const cur = getCurrentPeriod();
+  const [mes,setMes] = useState(cur.mes);
+  const [anio,setAnio] = useState(cur.anio);
 
+  const period = getPeriodRange(mes,anio);
+  const fRecs = filterByPeriod(recs,mes,anio).filter(r=>!r.disabled);
+  const allActive = recs.filter(r=>!r.disabled);
+
+  const years = useMemo(()=>{const s=new Set([anio]);recs.forEach(r=>{if(r.dt)s.add(parseInt(r.dt.substring(0,4)))});return[...s].sort()},[recs,anio]);
+
+  // KPIs del período
+  const tMt = fRecs.reduce((s,r)=>s+(r.ml||0),0);
+  const tPI = fRecs.reduce((s,r)=>s+(r.pi||0),0);
+  const tPA = fRecs.reduce((s,r)=>s+((r.pa||0)+(r.pa2||0)),0);
+  const tN = fRecs.length;
+
+  // Metros por producto
+  const byProd = useMemo(()=>{const m={};fRecs.forEach(r=>{if(!m[r.p])m[r.p]={mt:0,n:0,q:0};m[r.p].mt+=r.ml||0;m[r.p].n+=1;m[r.p].q+=(r.pi||0)+(r.pa||0)+(r.pa2||0)});return Object.entries(m).sort((a,b)=>b[1].mt-a[1].mt)},[fRecs]);
+
+  // Top 5 técnicos por metros
+  const topInst = useMemo(()=>{const m={};fRecs.forEach(r=>{if(r.i&&r.i!=="—"){if(!m[r.i])m[r.i]={mt:0,n:0};m[r.i].mt+=r.ml||0;m[r.i].n+=1}});return Object.entries(m).sort((a,b)=>b[1].mt-a[1].mt).slice(0,5)},[fRecs]);
+
+  // Top 5 ayudantes por metros
+  const topAyud = useMemo(()=>{const m={};fRecs.forEach(r=>{if(r.a&&r.a!=="—"){if(!m[r.a])m[r.a]={mt:0,n:0};m[r.a].mt+=r.ml||0;m[r.a].n+=1}if(r.a2&&r.a2!=="—"){if(!m[r.a2])m[r.a2]={mt:0,n:0};m[r.a2].mt+=r.ml||0;m[r.a2].n+=1}});return Object.entries(m).sort((a,b)=>b[1].mt-a[1].mt).slice(0,5)},[fRecs]);
+
+  // Top 10 cotizaciones por metros (agrupadas por #coti)
+  const topCotis = useMemo(()=>{const m={};fRecs.forEach(r=>{if(r.co&&r.co!=="01"&&r.co!=="—"){if(!m[r.co])m[r.co]={mt:0,n:0,cl:r.cl||"",q:0};m[r.co].mt+=r.ml||0;m[r.co].n+=1;m[r.co].q+=(r.pi||0)+(r.pa||0)}});return Object.entries(m).sort((a,b)=>b[1].mt-a[1].mt).slice(0,10)},[fRecs]);
+
+  // Eventos/errores del período (contar todos los eventos documentados en scorecard)
+  const eventStats = useMemo(()=>{
+    let total=0; const byType={};
+    const countEvents = (sd,list)=>{
+      list.forEach(p=>{const ps=sd[p.id];if(!ps)return;
+        CRIT.forEach(c=>{const v=ps[c.id];if(v&&typeof v==="object"&&v.events){
+          v.events.forEach(ev=>{if(!ev.date||ev.date>=period.start&&ev.date<period.end){total++;if(!byType[c.l])byType[c.l]=0;byType[c.l]++}})
+        }})
+      });
+    };
+    countEvents(scores,inst); countEvents(scoresA,ayud);
+    const top5 = Object.entries(byType).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    return {total,top5};
+  },[scores,scoresA,inst,ayud,period]);
+
+  function prevMonth(){if(mes===0){setMes(11);setAnio(anio-1)}else setMes(mes-1)}
+  function nextMonth(){if(mes===11){setMes(0);setAnio(anio+1)}else setMes(mes+1)}
+
+  return <div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
+      <div>
+        <div style={{fontSize:10,fontWeight:800,letterSpacing:3,color:"#3b82f6",marginBottom:4}}>GRUPO FPC</div>
+        <h1 style={{fontSize:26,fontWeight:900,color:"#f1f5f9",margin:0}}>Dashboard Ejecutivo</h1>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <button className="btn bg" onClick={prevMonth} style={{padding:"6px 12px",fontSize:16}}>◀</button>
+        <select className="sel" value={mes} onChange={e=>setMes(parseInt(e.target.value))} style={{width:140}}>{MESES.map((m,i)=><option key={i} value={i}>{m}</option>)}</select>
+        <select className="sel" value={anio} onChange={e=>setAnio(parseInt(e.target.value))} style={{width:90}}>{years.map(y=><option key={y} value={y}>{y}</option>)}</select>
+        <button className="btn bg" onClick={nextMonth} style={{padding:"6px 12px",fontSize:16}}>▶</button>
+      </div>
+    </div>
+
+    <div style={{fontSize:12,color:"#64748b",marginBottom:16,padding:"8px 14px",background:"rgba(15,23,42,.4)",borderRadius:8,display:"inline-block"}}>Período: {period.labelCorto}</div>
+
+    {/* KPIs */}
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:12,marginBottom:20}}>
+      <KPI label="Instalaciones" value={tN} accent="#f1f5f9" icon="✎"/>
+      <KPI label="Metros Totales" value={N(tMt)} accent="#60a5fa" icon="▤"/>
+      <KPI label="Técnicos Activos" value={inst.filter(t=>t.on).length} accent="#60a5fa" icon="◈"/>
+      <KPI label="Ayudantes Activos" value={ayud.filter(t=>t.on).length} accent="#a78bfa" icon="◇"/>
+      {cm&&<KPI label="Pago Instaladores" value={Q(tPI)} accent="#10b981" icon="$"/>}
+      {cm&&<KPI label="Pago Ayudantes" value={Q(tPA)} accent="#10b981" icon="$"/>}
+      {cm&&<KPI label="Pago Total" value={Q(tPI+tPA)} accent="#fbbf24" icon="★"/>}
+      <KPI label="Eventos/Errores" value={eventStats.total} accent={eventStats.total>0?"#ef4444":"#10b981"} icon="⚠"/>
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:16,marginBottom:18}}>
+      {/* Top 5 Técnicos */}
+      <div className="card"><div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Top 5 Técnicos — {MESES[mes]}</div>
+        <div style={{padding:"8px 20px 16px"}}>{topInst.length?<HBar data={topInst.map(([n,d])=>({l:n.split(" ").slice(0,2).join(" "),v:d.mt}))} color="#3b82f6"/>:<div style={{padding:20,textAlign:"center",color:"#475569",fontSize:12}}>Sin datos</div>}</div></div>
+
+      {/* Top 5 Ayudantes */}
+      <div className="card"><div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Top 5 Ayudantes — {MESES[mes]}</div>
+        <div style={{padding:"8px 20px 16px"}}>{topAyud.length?<HBar data={topAyud.map(([n,d])=>({l:n.split(" ").slice(0,2).join(" "),v:d.mt}))} color="#a78bfa"/>:<div style={{padding:20,textAlign:"center",color:"#475569",fontSize:12}}>Sin datos</div>}</div></div>
+    </div>
+
+    {/* Metros y Dinero por Producto */}
+    <div className="card" style={{marginBottom:18}}>
+      <div className="card-h"><span style={{color:"#8b5cf6"}}>▤</span> Metros y Pagos por Producto — {MESES[mes]}</div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr>{["Producto","Cantidad","Metros",...(cm?["Q Total"]:[])].map((h,i)=><th key={h} className="th" style={i>=1?{textAlign:"right"}:{}}>{h}</th>)}</tr></thead>
+        <tbody>{byProd.map(([p,d])=><tr key={p}>
+          <td className="td" style={{fontWeight:700}}>{p}</td>
+          <td className="td" style={{textAlign:"right"}}>{d.n}</td>
+          <td className="td" style={{textAlign:"right",color:"#60a5fa",fontWeight:700}}>{N(d.mt)}</td>
+          {cm&&<td className="td" style={{textAlign:"right",color:"#10b981",fontWeight:700}}>{Q(d.q)}</td>}
+        </tr>)}
+        {byProd.length>0&&<tr style={{background:"rgba(12,20,36,.5)"}}><td className="td" style={{fontWeight:800,borderTop:"2px solid rgba(30,48,72,.5)"}}>TOTAL</td><td className="td" style={{textAlign:"right",fontWeight:800,borderTop:"2px solid rgba(30,48,72,.5)"}}>{byProd.reduce((a,x)=>a+x[1].n,0)}</td><td className="td" style={{textAlign:"right",fontWeight:900,color:"#60a5fa",borderTop:"2px solid rgba(30,48,72,.5)"}}>{N(tMt)}</td>{cm&&<td className="td" style={{textAlign:"right",fontWeight:900,color:"#fbbf24",borderTop:"2px solid rgba(30,48,72,.5)"}}>{Q(tPI+tPA)}</td>}</tr>}
+        </tbody></table>
+        {!byProd.length&&<div style={{padding:30,textAlign:"center",color:"#475569",fontSize:12}}>Sin datos en este período</div>}
+      </div>
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:16,marginBottom:18}}>
+      {/* Top 10 Cotizaciones */}
+      <div className="card"><div className="card-h"><span style={{color:"#fbbf24"}}>📋</span> Top 10 Cotizaciones por Metros</div>
+        <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr>{["Cotización","Cliente","Registros","Metros",...(cm?["Q"]:[])].map((h,i)=><th key={h} className="th" style={i>=2?{textAlign:"right"}:{}}>{h}</th>)}</tr></thead>
+          <tbody>{topCotis.map(([co,d])=><tr key={co}>
+            <td className="td" style={{color:"#60a5fa",fontWeight:700}}>{co}</td>
+            <td className="td" style={{color:"#94a3b8",maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.cl}</td>
+            <td className="td" style={{textAlign:"right"}}>{d.n}</td>
+            <td className="td" style={{textAlign:"right",fontWeight:800}}>{N(d.mt)}</td>
+            {cm&&<td className="td" style={{textAlign:"right",color:"#10b981",fontWeight:700}}>{Q(d.q)}</td>}
+          </tr>)}</tbody></table>
+          {!topCotis.length&&<div style={{padding:20,textAlign:"center",color:"#475569",fontSize:12}}>Sin datos</div>}
+        </div>
+      </div>
+
+      {/* Top 5 Eventos más frecuentes */}
+      <div className="card"><div className="card-h"><span style={{color:"#ef4444"}}>⚠</span> Eventos más Frecuentes — {MESES[mes]}</div>
+        <div style={{padding:"12px 20px 16px"}}>
+          {eventStats.top5.length?eventStats.top5.map(([tipo,cnt])=><div key={tipo} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid rgba(30,48,72,.2)"}}>
+            <span style={{flex:1,fontSize:13,color:"#e2e8f0"}}>{tipo}</span>
+            <span style={{fontSize:16,fontWeight:900,color:cnt>2?"#ef4444":"#f59e0b"}}>{cnt}</span>
+          </div>):<div style={{padding:20,textAlign:"center",color:"#10b981",fontSize:13}}>🟢 Sin eventos negativos en este período</div>}
+          <div style={{marginTop:10,fontSize:11,color:"#64748b",textAlign:"right"}}>Total eventos: <b style={{color:eventStats.total>0?"#ef4444":"#10b981"}}>{eventStats.total}</b></div>
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD SCORECARD — vista para instaladores/ayudantes + calendario
+// ═══════════════════════════════════════════════════════════
+function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClick}){
   const scInst = inst.filter(t=>t.on).map(t=>({...t,score:getScore(scores,t.id,inst),mt:bI[t.name]?.mt||0,n:bI[t.name]?.n||0})).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
   const scAyud = ayud.filter(t=>t.on).map(t=>({...t,score:getScore(scoresA,t.id,ayud),mt:bA[t.name]?.mt||0,n:bA[t.name]?.n||0})).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
 
   return <div>
     <div style={{marginBottom:20}}>
       <div style={{fontSize:10,fontWeight:800,letterSpacing:3,color:"#3b82f6",marginBottom:4}}>GRUPO FPC</div>
-      <h1 style={{fontSize:26,fontWeight:900,color:"#f1f5f9",margin:0}}>{publicOnly?"Dashboard de Equipo":"Dashboard Ejecutivo"}</h1>
-      {publicOnly && <p style={{fontSize:13,color:"#64748b",margin:"6px 0 0"}}>Haz clic en tu nombre para ver el detalle de tu scorecard</p>}
+      <h1 style={{fontSize:26,fontWeight:900,color:"#f1f5f9",margin:0}}>Dashboard Scorecard</h1>
+      <p style={{fontSize:13,color:"#64748b",margin:"6px 0 0"}}>Haz clic en tu nombre para ver el detalle de tu scorecard</p>
     </div>
 
-    {!publicOnly && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",gap:12,marginBottom:22}}>
-      <KPI label="Instaladores" value={inst.filter(t=>t.on).length} accent="#60a5fa" icon="◈"/>
-      <KPI label="Ayudantes" value={ayud.filter(t=>t.on).length} accent="#60a5fa" icon="◇"/>
-      <KPI label="Inst. Cat A" value={cA} sub={`${cA+cB?Math.round(cA/(cA+cB)*100):0}% elite`} accent="#10b981" icon="★"/>
-      <KPI label="Inst. Cat B" value={cB} accent="#94a3b8" icon="◇"/>
-      <KPI label="Instalaciones" value={tN.toLocaleString()} accent="#f1f5f9" icon="✎"/>
-      <KPI label="Metros Totales" value={N(tMt)} accent="#f1f5f9" icon="▤"/>
-      {cm&&<KPI label="Pago Total" value={Q(tPI+tPA)} accent="#fbbf24" icon="$"/>}
-    </div>}
-
-    {/* SCORECARD INSTALADORES — más grande, con click */}
     <div className="card" style={{marginBottom:18}}>
-      <div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Scorecard Instaladores <span style={{fontSize:11,fontWeight:400,color:"#64748b",marginLeft:8}}>(Clic en cada nombre para ver detalle)</span></div>
+      <div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Scorecard Instaladores</div>
       <div style={{padding:18}}>
         {scInst.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
           {scInst.map(t=><ScoreCard key={t.id} person={t} score={t.score} n={t.n} mt={t.mt} onClick={()=>onPersonClick("inst",t)}/>)}
@@ -632,22 +756,14 @@ function DashV({inst,ayud,bI,bA,bP,tMt,tN,cm,tPI,tPA,scores,scoresA,publicOnly,o
       </div>
     </div>
 
-    {/* SCORECARD AYUDANTES */}
     <div className="card" style={{marginBottom:18}}>
-      <div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Scorecard Ayudantes <span style={{fontSize:11,fontWeight:400,color:"#64748b",marginLeft:8}}>(Clic en cada nombre para ver detalle)</span></div>
+      <div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Scorecard Ayudantes</div>
       <div style={{padding:18}}>
         {scAyud.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
           {scAyud.map(t=><ScoreCard key={t.id} person={t} score={t.score} n={t.n} mt={t.mt} onClick={()=>onPersonClick("ayud",t)}/>)}
         </div>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:13}}>Sin ayudantes activos</div>}
       </div>
     </div>
-
-    {!publicOnly && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(340px,1fr))",gap:16}}>
-      <div className="card"><div className="card-h"><span style={{color:"#3b82f6"}}>◈</span> Ranking por Metros</div>
-        <div style={{padding:"8px 20px 16px"}}>{topI.length?<HBar data={topI.map(([n,d])=>({l:n.split(" ").slice(0,2).join(" "),v:d.mt}))} color="#3b82f6"/>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:12}}>Sin registros</div>}</div></div>
-      <div className="card"><div className="card-h"><span style={{color:"#8b5cf6"}}>▤</span> Metros por Producto</div>
-        <div style={{padding:"8px 20px 16px"}}>{topP.length?<HBar data={topP.map(([n,d])=>({l:n,v:d.mt}))} color="#8b5cf6"/>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:12}}>Sin datos</div>}</div></div>
-    </div>}
   </div>;
 }
 
@@ -679,7 +795,7 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
   const payA = prod&&tA ? +(ml*(RATE[prod]?.[tA.cat]?.a||0)).toFixed(2) : 0;
   const payA2 = prod&&tA2 ? +(ml*(RATE[prod]?.[tA2.cat]?.a||0)).toFixed(2) : 0;
 
-  function add(){
+  function add(keepCoti){
     if(!canEdit){setMsg("❌ Sin permisos");return}
     if((!selI&&!selA)||!prod||!mn){setMsg("❌ Seleccione al menos instalador o ayudante, producto y metros");return}
     svR([{id:Date.now().toString(36),dt:today(),co:cot.trim(),cl:cli.trim(),
@@ -687,7 +803,10 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
       p:prod,m:mn,u:un,ml,pi:payI,pa:payA,pa2:payA2,
       by:user?.name||"Sistema"},...recs]);
     setMsg(`✅ Registrado: ${selI||selA} · ${prod} · ${N(ml)} mts`);
-    setProd("");setMts("");setUnis("1");setCot("");setCli("");setTimeout(()=>setMsg(""),4000);
+    // Si keepCoti, solo limpiar producto y metros (para agregar otro producto a la misma coti)
+    setProd("");setMts("");setUnis("1");
+    if(!keepCoti){setCot("");setCli("")}
+    setTimeout(()=>setMsg(""),4000);
   }
 
   function doAddPerson(which){
@@ -776,7 +895,8 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
         </div>}
 
         <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-          <button className="btn bs" onClick={add}>✓ Registrar</button>
+          <button className="btn bs" onClick={()=>add(false)}>✓ Registrar</button>
+          <button className="btn bp" onClick={()=>add(true)} title="Registrar y agregar otro producto a la misma cotización">✓ Registrar + Agregar otro producto</button>
           {msg&&<span style={{fontSize:12,color:msg[0]==="✅"?"#10b981":"#ef4444",fontWeight:600}}>{msg}</span>}
           {!canEdit&&!user&&<span style={{fontSize:11,color:"#f59e0b"}}>⚠ Inicie sesión para registrar</span>}
         </div>
