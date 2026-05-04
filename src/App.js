@@ -56,7 +56,7 @@ const INIT_AYUDANTES = [
   {id:"A13",name:"RODOLFO MARTINEZ",cat:"B",on:true},
 ];
 
-// ───── CRITERIOS SCORECARD ─────
+// ───── CRITERIOS SCORECARD (todos por número de eventos/faltas) ─────
 const CRIT = [
   {id:"c1",l:"Errores de Medición",d:"Cero errores atribuibles al técnico",A:0,B:3,cnt:true},
   {id:"c2",l:"Errores de Instalación",d:"Cero errores atribuibles",A:0,B:3,cnt:true},
@@ -64,14 +64,14 @@ const CRIT = [
   {id:"c4",l:"Garantías",d:"Cero garantías por mala instalación",A:0,B:2,cnt:true},
   {id:"c5",l:"Reclamos de Cliente",d:"Cero reclamos formales",A:0,B:1,cnt:true},
   {id:"c6",l:"Llamadas de Atención",d:"Cero llamadas vigentes",A:0,B:1,cnt:true},
-  {id:"c7",l:"Proceso de Llamadas",d:"Llamada inicio ruta + 1h antes + aviso retraso",A:100,B:90,cnt:false},
-  {id:"c8",l:"Evidencia Fotográfica",d:"Inmediata (Cat A) / Mismo día (Cat B)",A:100,B:90,cnt:false},
-  {id:"c9",l:"Constancia Firmada",d:"Entrega completa al finalizar",A:100,B:90,cnt:false},
-  {id:"c10",l:"Liquidación Viáticos",d:"24hrs (Cat A) / 48hrs (Cat B)",A:100,B:80,cnt:false},
-  {id:"c11",l:"Disciplina y Orden",d:"Uniforme, panel limpio, herramientas",A:100,B:80,cnt:false},
-  {id:"c12",l:"Servicio al Cliente",d:"Trato, limpieza, explicación de producto",A:100,B:80,cnt:false},
-  {id:"c13",l:"Revisión de Material",d:"Verificación completa antes de ruta",A:100,B:80,cnt:false},
-  {id:"c14",l:"Checklist de Instalación",d:"Nivelación, fijación, funcionamiento",A:100,B:80,cnt:false},
+  {id:"c7",l:"Proceso de Llamadas",d:"No llamó inicio ruta / no avisó retraso",A:0,B:2,cnt:true},
+  {id:"c8",l:"Evidencia Fotográfica",d:"No entregó evidencia fotográfica",A:0,B:2,cnt:true},
+  {id:"c9",l:"Constancia Firmada",d:"No entregó constancia firmada",A:0,B:2,cnt:true},
+  {id:"c10",l:"Liquidación Viáticos",d:"No liquidó viáticos en tiempo",A:0,B:2,cnt:true},
+  {id:"c11",l:"Disciplina y Orden",d:"Falta de uniforme, panel sucio, herramientas",A:0,B:2,cnt:true},
+  {id:"c12",l:"Servicio al Cliente",d:"Mal trato, no limpió, no explicó producto",A:0,B:2,cnt:true},
+  {id:"c13",l:"Revisión de Material",d:"No verificó material antes de ruta",A:0,B:2,cnt:true},
+  {id:"c14",l:"Checklist de Instalación",d:"No cumplió nivelación, fijación o funcionamiento",A:0,B:2,cnt:true},
 ];
 
 // ───── USUARIOS ─────
@@ -84,10 +84,35 @@ const USERS = {
   "ayudante":  {pw:"fpc123",      name:"Ayudante",             role:"viewer",    canMoney:false, canEdit:false, publicOnly:true},
 };
 
-// ───── STORAGE ─────
+// ───── STORAGE — Firebase Firestore ─────
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBOSKF8Eo8JXM8wkqprWV2viXatMSHI5Qg",
+  authDomain: "fpc-sistema.firebaseapp.com",
+  projectId: "fpc-sistema",
+  storageBucket: "fpc-sistema.firebasestorage.app",
+  messagingSenderId: "499421752797",
+  appId: "1:499421752797:web:e306b639c349830d985a34",
+  measurementId: "G-KE5JMC8VRT"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const fbDb = getFirestore(fbApp);
+
 const DB = {
-  async get(k){try{const r=await window.storage.get(k);return r?JSON.parse(r.value):null}catch{return null}},
-  async set(k,v){try{await window.storage.set(k,JSON.stringify(v))}catch(e){console.error(e)}},
+  async get(k){
+    try {
+      const snap = await getDoc(doc(fbDb, "fpc_data", k));
+      return snap.exists() ? snap.data().value : null;
+    } catch(e){ console.error("DB get error:",e); return null; }
+  },
+  async set(k,v){
+    try {
+      await setDoc(doc(fbDb, "fpc_data", k), { value: v, updated: new Date().toISOString() });
+    } catch(e){ console.error("DB set error:",e); }
+  },
 };
 
 // ───── HELPERS ─────
@@ -127,8 +152,8 @@ function getScore(sd, tid, list){
     const v = getCritValue(sd,tid,c.id);
     if(v===undefined) return;
     const mx = t.cat==="A"?c.A:c.B;
-    if(c.cnt){ tot += v<=mx ? 100 : Math.max(0, 100-((v-mx)*25)) }
-    else    { tot += v>=mx ? 100 : Math.round((v/Math.max(mx,1))*100) }
+    // Todos los criterios son por conteo de eventos (faltas)
+    tot += v<=mx ? 100 : Math.max(0, 100-((v-mx)*25));
     cnt++;
   });
   return cnt ? Math.round(tot/cnt) : null;
@@ -519,15 +544,9 @@ function PersonDetailModal({kind,person,scores,bData,onClose}){
           const mx = person.cat==="A"?crit.A:crit.B;
           let ic="⚪", cl="#475569", st="Sin evaluar";
           if(v!==undefined){
-            if(crit.cnt){
-              if(v===0){ic="🟢";cl="#10b981";st="Cero eventos — Excelente"}
-              else if(v<=mx){ic="🟡";cl="#f59e0b";st=`${v} evento(s) — Dentro del límite`}
-              else{ic="🔴";cl="#ef4444";st=`${v} evento(s) — Excede límite (máx ${mx})`}
-            } else {
-              if(v>=mx){ic="🟢";cl="#10b981";st=`${v}% — Cumple`}
-              else if(v>=mx*.8){ic="🟡";cl="#f59e0b";st=`${v}% — Cerca del objetivo`}
-              else{ic="🔴";cl="#ef4444";st=`${v}% — Por debajo del objetivo`}
-            }
+            if(v===0){ic="🟢";cl="#10b981";st="Cero eventos — Excelente"}
+            else if(v<=mx){ic="🟡";cl="#f59e0b";st=`${v} evento(s) — Dentro del límite`}
+            else{ic="🔴";cl="#ef4444";st=`${v} evento(s) — Excede límite (máx ${mx})`}
           }
           return <div key={crit.id} style={{marginBottom:10,padding:"12px 14px",background:"rgba(15,23,42,.5)",borderRadius:10,border:`1px solid ${cl}20`}}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:events.length?8:0}}>
@@ -538,7 +557,7 @@ function PersonDetailModal({kind,person,scores,bData,onClose}){
               </div>
               <div style={{textAlign:"right",flexShrink:0}}>
                 <div style={{fontSize:11,fontWeight:700,color:cl}}>{st}</div>
-                <div style={{fontSize:10,color:"#475569"}}>Meta: {crit.cnt?`máx ${mx}`:`${mx}%`}</div>
+                <div style={{fontSize:10,color:"#475569"}}>Meta: máx {mx} eventos</div>
               </div>
             </div>
             {events.length>0 && <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(30,48,72,.4)"}}>
@@ -1059,16 +1078,13 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind}){
               <span style={{fontSize:18,flexShrink:0}}>{ic}</span>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:700,color:"#e2e8f0"}}>{c.l}</div>
-                <div style={{fontSize:11,color:"#475569"}}>{c.d} · Meta: {c.cnt?`máx ${mx}`:`${mx}%`}</div>
+                <div style={{fontSize:11,color:"#475569"}}>{c.d} · Meta: máx {mx} eventos</div>
               </div>
-              {c.cnt ? <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
                 <span style={{fontSize:11,color:"#64748b"}}>Eventos:</span>
                 <span style={{minWidth:40,textAlign:"center",fontSize:18,fontWeight:900,color:cl}}>{events.length||(v||0)}</span>
                 {canEdit&&<button className="btn bp" style={{padding:"6px 12px",fontSize:11}} onClick={()=>{setEvtCrit(c);setEvtDate(today())}}>+ Documentar</button>}
-              </div> : <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                <input className="inp" type="number" value={v!==undefined?v:""} onChange={e=>setRawValue(c.id,e.target.value)} placeholder="100" style={{width:80,textAlign:"center",fontSize:14,fontWeight:800,color:cl}} disabled={!canEdit}/>
-                <span style={{fontSize:11,color:"#64748b"}}>%</span>
-              </div>}
+              </div>
             </div>
 
             {events.length>0 && <div style={{marginTop:10,marginLeft:30}}>
