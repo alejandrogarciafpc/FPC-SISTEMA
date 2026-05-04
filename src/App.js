@@ -287,11 +287,18 @@ export default function App(){
   const bA = useMemo(()=>{
     const m={};
     recs.forEach(r=>{
-      if(!r.a || r.a==="—") return;
-      if(!m[r.a]) m[r.a]={mt:0,pa:0,n:0,pr:{}};
-      m[r.a].mt+=r.ml||0; m[r.a].pa+=r.pa||0; m[r.a].n+=1;
-      if(!m[r.a].pr[r.p]) m[r.a].pr[r.p]={mt:0,pa:0,n:0};
-      m[r.a].pr[r.p].mt+=r.ml||0; m[r.a].pr[r.p].pa+=r.pa||0; m[r.a].pr[r.p].n+=1;
+      if(r.a && r.a!=="—"){
+        if(!m[r.a]) m[r.a]={mt:0,pa:0,n:0,pr:{}};
+        m[r.a].mt+=r.ml||0; m[r.a].pa+=r.pa||0; m[r.a].n+=1;
+        if(!m[r.a].pr[r.p]) m[r.a].pr[r.p]={mt:0,pa:0,n:0};
+        m[r.a].pr[r.p].mt+=r.ml||0; m[r.a].pr[r.p].pa+=r.pa||0; m[r.a].pr[r.p].n+=1;
+      }
+      if(r.a2 && r.a2!=="—"){
+        if(!m[r.a2]) m[r.a2]={mt:0,pa:0,n:0,pr:{}};
+        m[r.a2].mt+=r.ml||0; m[r.a2].pa+=r.pa2||0; m[r.a2].n+=1;
+        if(!m[r.a2].pr[r.p]) m[r.a2].pr[r.p]={mt:0,pa:0,n:0};
+        m[r.a2].pr[r.p].mt+=r.ml||0; m[r.a2].pr[r.p].pa+=r.pa2||0; m[r.a2].pr[r.p].n+=1;
+      }
     });
     return m;
   },[recs]);
@@ -642,7 +649,7 @@ function DashV({inst,ayud,bI,bA,bP,tMt,tN,cm,tPI,tPA,scores,scoresA,publicOnly,o
 function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
   const aI = inst.filter(t=>t.on);
   const aA = ayud.filter(t=>t.on);
-  const [selI,setSelI]=useState(""); const [selA,setSelA]=useState("");
+  const [selI,setSelI]=useState(""); const [selA,setSelA]=useState(""); const [selA2,setSelA2]=useState("");
   const [prod,setProd]=useState(""); const [mts,setMts]=useState(""); const [unis,setUnis]=useState("1");
   const [cot,setCot]=useState(""); const [cli,setCli]=useState(""); const [msg,setMsg]=useState("");
   const [addI,setAddI]=useState(false); const [addA,setAddA]=useState(false);
@@ -650,16 +657,21 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
 
   const tI = aI.find(x=>x.name===selI);
   const tA = aA.find(x=>x.name===selA);
+  const tA2 = aA.find(x=>x.name===selA2);
   const mn=parseFloat(mts)||0; const un=parseInt(unis)||1; const ml=+(mn*un).toFixed(2);
-  const pay = prod&&tI ? cPay(prod,ml,tI.cat,tA?.cat||"B") : {pi:0,pa:0};
+  // Calcular pagos: si hay instalador usa su cat, si no hay instalador pi=0
+  const payI = prod&&tI ? +(ml*(RATE[prod]?.[tI.cat]?.i||0)).toFixed(2) : 0;
+  const payA = prod&&tA ? +(ml*(RATE[prod]?.[tA.cat]?.a||0)).toFixed(2) : 0;
+  const payA2 = prod&&tA2 ? +(ml*(RATE[prod]?.[tA2.cat]?.a||0)).toFixed(2) : 0;
 
   function add(){
     if(!canEdit){setMsg("❌ Sin permisos");return}
-    if(!selI||!prod||!mn){setMsg("❌ Seleccione instalador, producto y metros");return}
+    if((!selI&&!selA)||!prod||!mn){setMsg("❌ Seleccione al menos instalador o ayudante, producto y metros");return}
     svR([{id:Date.now().toString(36),dt:today(),co:cot.trim(),cl:cli.trim(),
-      i:selI,a:selA||"—",cI:tI.cat,cA:tA?.cat||"B",p:prod,m:mn,u:un,ml,pi:pay.pi,pa:pay.pa,
+      i:selI||"—",a:selA||"—",a2:selA2||"—",cI:tI?.cat||"—",cA:tA?.cat||"B",cA2:tA2?.cat||"B",
+      p:prod,m:mn,u:un,ml,pi:payI,pa:payA,pa2:payA2,
       by:user?.name||"Sistema"},...recs]);
-    setMsg(`✅ Registrado: ${selI} · ${prod} · ${N(ml)} mts`);
+    setMsg(`✅ Registrado: ${selI||selA} · ${prod} · ${N(ml)} mts`);
     setProd("");setMts("");setUnis("1");setCot("");setCli("");setTimeout(()=>setMsg(""),4000);
   }
 
@@ -673,17 +685,17 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
 
   return <div>
     <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:"0 0 4px"}}>Ingreso de Metros</h1>
-    <p style={{fontSize:13,color:"#475569",margin:"0 0 20px"}}>Instalador y ayudante son independientes — los metros se asignan a quien tú elijas en cada registro</p>
+    <p style={{fontSize:13,color:"#475569",margin:"0 0 20px"}}>Instalador y ayudante son independientes — puedes registrar solo ayudante si no hay instalador</p>
 
     <div className="card" style={{marginBottom:18}}>
       <div className="card-h"><span style={{color:"#10b981"}}>✎</span> Nuevo Registro</div>
       <div style={{padding:20}}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
           <div>
-            <label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Instalador *</label>
+            <label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Instalador (opcional)</label>
             <div style={{display:"flex",gap:8}}>
               <select className="sel" value={selI} onChange={e=>setSelI(e.target.value)}>
-                <option value="">— Seleccionar —</option>
+                <option value="">— Sin instalador —</option>
                 {aI.map(x=><option key={x.id} value={x.name}>{x.name} {x.cat==="A"?"(★A)":"(B)"}</option>)}
               </select>
               {canEdit&&<button className="plus" onClick={()=>setAddI(true)} title="Agregar nuevo instalador">+</button>}
@@ -713,6 +725,17 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
           </div>
         </div>
 
+        {/* Ayudante 2 (opcional) */}
+        <div style={{marginBottom:14}}>
+          <label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Ayudante 2 (opcional — si van dos ayudantes)</label>
+          <div style={{display:"flex",gap:8}}>
+            <select className="sel" value={selA2} onChange={e=>setSelA2(e.target.value)}>
+              <option value="">— Sin segundo ayudante —</option>
+              {aA.filter(x=>x.name!==selA).map(x=><option key={x.id} value={x.name}>{x.name} {x.cat==="A"?"(★A)":"(B)"}</option>)}
+            </select>
+          </div>
+        </div>
+
         <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:14,marginBottom:14}}>
           <div><label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Producto *</label>
             <select className="sel" value={prod} onChange={e=>setProd(e.target.value)}><option value="">— Seleccionar —</option>{PRODS.map(p=><option key={p} value={p}>{p}</option>)}</select></div>
@@ -727,12 +750,14 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
           <div><label style={{fontSize:10,fontWeight:700,color:"#64748b",display:"block",marginBottom:5,textTransform:"uppercase"}}>Cliente</label><input className="inp" value={cli} onChange={e=>setCli(e.target.value)} placeholder="Nombre"/></div>
         </div>
 
-        {selI&&prod&&mn>0&&<div style={{background:"rgba(15,23,42,.5)",borderRadius:12,padding:14,marginBottom:16,border:"1px solid rgba(30,48,72,.4)",display:"flex",flexWrap:"wrap",gap:20,fontSize:12,alignItems:"center"}}>
-          <div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Instalador</span><div style={{fontWeight:700,color:"#f1f5f9",fontSize:13,display:"flex",gap:6,alignItems:"center"}}>{selI} <Cat c={tI?.cat}/></div></div>
-          <div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Ayudante</span><div style={{fontWeight:700,color:"#f1f5f9",fontSize:13,display:"flex",gap:6,alignItems:"center"}}>{selA||"—"} {tA&&<Cat c={tA.cat}/>}</div></div>
+        {(selI||selA)&&prod&&mn>0&&<div style={{background:"rgba(15,23,42,.5)",borderRadius:12,padding:14,marginBottom:16,border:"1px solid rgba(30,48,72,.4)",display:"flex",flexWrap:"wrap",gap:20,fontSize:12,alignItems:"center"}}>
+          {selI&&<div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Instalador</span><div style={{fontWeight:700,color:"#f1f5f9",fontSize:13,display:"flex",gap:6,alignItems:"center"}}>{selI} <Cat c={tI?.cat}/></div></div>}
+          {selA&&<div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Ayudante 1</span><div style={{fontWeight:700,color:"#f1f5f9",fontSize:13,display:"flex",gap:6,alignItems:"center"}}>{selA} <Cat c={tA?.cat}/></div></div>}
+          {selA2&&<div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Ayudante 2</span><div style={{fontWeight:700,color:"#f1f5f9",fontSize:13,display:"flex",gap:6,alignItems:"center"}}>{selA2} <Cat c={tA2?.cat}/></div></div>}
           <div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Metros</span><div style={{fontWeight:900,color:"#f1f5f9",fontSize:20}}>{N(ml)}</div></div>
-          <div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Pago Inst</span><div style={{fontWeight:700,color:"#10b981",fontSize:14}}>{Q(pay.pi)}</div></div>
-          <div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Pago Ayud</span><div style={{fontWeight:700,color:"#10b981",fontSize:14}}>{Q(pay.pa)}</div></div>
+          {selI&&<div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Pago Inst</span><div style={{fontWeight:700,color:"#10b981",fontSize:14}}>{Q(payI)}</div></div>}
+          {selA&&<div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Pago Ay1</span><div style={{fontWeight:700,color:"#10b981",fontSize:14}}>{Q(payA)}</div></div>}
+          {selA2&&<div><span style={{color:"#475569",fontSize:10,textTransform:"uppercase"}}>Pago Ay2</span><div style={{fontWeight:700,color:"#10b981",fontSize:14}}>{Q(payA2)}</div></div>}
         </div>}
 
         <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
@@ -748,17 +773,16 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
         {recs.length>0&&canEdit&&<button className="btn bg" style={{fontSize:11,padding:"5px 12px"}} onClick={()=>{if(window.confirm("¿Eliminar TODOS los registros?"))svR([])}}>Limpiar todo</button>}</div>
       <div style={{overflowX:"auto",maxHeight:480}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>
-          {["Fecha","Cot","Cliente","Instalador","Ayudante","Producto","Mts","Cat I","Cat A",""].map(h=><th key={h} className="th" style={h==="Mts"?{textAlign:"right"}:{}}>{h}</th>)}
+          {["Fecha","Cot","Cliente","Instalador","Ayudante 1","Ayudante 2","Producto","Mts",""].map(h=><th key={h} className="th" style={h==="Mts"?{textAlign:"right"}:{}}>{h}</th>)}
         </tr></thead><tbody>{recs.slice(0,30).map(r=><tr key={r.id}>
           <td className="td" style={{color:"#475569"}}>{r.dt}</td>
           <td className="td" style={{color:"#64748b"}}>{r.co||"—"}</td>
           <td className="td" style={{maxWidth:140,overflow:"hidden",textOverflow:"ellipsis"}}>{r.cl||"—"}</td>
-          <td className="td" style={{fontWeight:700}}>{r.i}</td>
-          <td className="td" style={{color:"#94a3b8"}}>{r.a}</td>
+          <td className="td" style={{fontWeight:700}}>{r.i||"—"}</td>
+          <td className="td" style={{color:"#94a3b8"}}>{r.a||"—"}</td>
+          <td className="td" style={{color:"#94a3b8"}}>{r.a2||"—"}</td>
           <td className="td" style={{color:"#60a5fa",fontWeight:600}}>{r.p}</td>
           <td className="td" style={{textAlign:"right",fontWeight:800,fontSize:13}}>{N(r.ml)}</td>
-          <td className="td"><Cat c={r.cI||r.c||"B"}/></td>
-          <td className="td"><Cat c={r.cA||"B"}/></td>
           <td className="td">{canEdit&&<button style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14}} onClick={()=>svR(recs.filter(x=>x.id!==r.id))}>✕</button>}</td>
         </tr>)}</tbody></table>
         {!recs.length&&<div style={{padding:40,textAlign:"center",color:"#334155",fontSize:13}}>Sin registros</div>}
