@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback, useMemo, Fragment } from "react";
    GRUPO FPC — Sistema de Control de Instalaciones v3.0
    ─────────────────────────────────────────────────────────────────── */
 
-// ───── TABLAS DE PAGO ─────
-const RATE = {
+// ───── TABLAS DE PAGO FPC ─────
+const RATE_FPC = {
   "ENROLLABLE":{A:{i:5,a:2.5},B:{i:4,a:2}},"HORIZONTAL 1\"":{A:{i:5,a:2.5},B:{i:4,a:2}},
   "HORIZONTAL 2\"":{A:{i:5,a:2.5},B:{i:4,a:2}},"VERTICALES":{A:{i:5,a:2.5},B:{i:4,a:2}},
   "PUERTA PLEGABLE":{A:{i:6,a:3},B:{i:5,a:2.5}},"MOTOR Y CANALETA":{A:{i:8,a:4},B:{i:8,a:4}},
@@ -23,7 +23,39 @@ const RATE = {
   "GARANTIA":{A:{i:0,a:0},B:{i:0,a:0}},"SOBRELUZ":{A:{i:5,a:2.5},B:{i:4,a:2}},
   "VTI":{A:{i:10,a:5},B:{i:8,a:4}},"TOLDO":{A:{i:15,a:7.5},B:{i:15,a:7.5}},
 };
-const PRODS = Object.keys(RATE);
+
+// ───── TABLAS DE PAGO SERVI PERSIANAS (tarifa única, sin A/B) ─────
+const RATE_SP = {
+  "ENROLLABLE":{A:{i:4,a:2},B:{i:4,a:2}},"HORIZONTAL 1\"":{A:{i:4,a:2},B:{i:4,a:2}},
+  "HORIZONTAL 2\"":{A:{i:4,a:2},B:{i:4,a:2}},"VERTICALES":{A:{i:4,a:2},B:{i:4,a:2}},
+  "PUERTA PLEGABLE":{A:{i:8,a:4},B:{i:8,a:4}},"FRANCESA":{A:{i:4,a:2},B:{i:4,a:2}},
+  "ROMANAS":{A:{i:4,a:2},B:{i:4,a:2}},"RIPPLEFOLD":{A:{i:4,a:2},B:{i:4,a:2}},
+  "CENEFA DE CAJON":{A:{i:4,a:2},B:{i:4,a:2}},"PANEL DESLIZANTE":{A:{i:4,a:2},B:{i:4,a:2}},
+  "GIGA GUIADA":{A:{i:7,a:3.5},B:{i:7,a:3.5}},"MEDICION / COTIZAR":{A:{i:10,a:5},B:{i:10,a:5}},
+  "GALERIAS":{A:{i:4,a:2},B:{i:4,a:2}},"MOTOR (REPROGRAMACION)":{A:{i:4,a:2},B:{i:4,a:2}},
+  "MOTOR Y CANALETA":{A:{i:7,a:3.5},B:{i:7,a:3.5}},"CENEFA DE PVC":{A:{i:2,a:1},B:{i:2,a:1}},
+  "BONO ESPECIAL / VISITA":{A:{i:0,a:0},B:{i:0,a:0}},"CASETTE":{A:{i:5,a:3.5},B:{i:5,a:3.5}},
+  "DESMONTE GENERAL":{A:{i:5,a:2.5},B:{i:5,a:2.5}},"DESMONTE PUERTA PLEGABLE":{A:{i:5,a:2.5},B:{i:5,a:2.5}},
+  "DESMONTE ATOS NO Y GUIADA":{A:{i:5,a:2.5},B:{i:5,a:2.5}},"GARANTIAS":{A:{i:0,a:0},B:{i:0,a:0}},
+  "PALILLERIA":{A:{i:5,a:2.5},B:{i:5,a:2.5}},"CAMBIO DE CADENA":{A:{i:5,a:2.5},B:{i:5,a:2.5}},
+  "ENROLLABLE MOTORIZADA":{A:{i:5,a:2.5},B:{i:5,a:2.5}},"ENROLLABLE NUEVO":{A:{i:4,a:2},B:{i:4,a:2}},
+  "HORIZONTAL 1\" NUEVO":{A:{i:4,a:2},B:{i:4,a:2}},"HORIZONTAL 2\" NUEVO":{A:{i:4,a:2},B:{i:4,a:2}},
+  "VERTICALES NUEVO":{A:{i:4,a:2},B:{i:4,a:2}},"PUERTA PLEGABLE NUEVO":{A:{i:7,a:3.5},B:{i:7,a:3.5}},
+  "GIGA NUEVO":{A:{i:8,a:4},B:{i:8,a:4}},"ROMANA NUEVO":{A:{i:6,a:3},B:{i:6,a:3}},
+  "RIPPLEFOLD NUEVO":{A:{i:6,a:3},B:{i:6,a:3}},"FRANCESA NUEVO":{A:{i:6,a:3},B:{i:6,a:3}},
+  "PLANCHAR":{A:{i:3,a:1.5},B:{i:3,a:1.5}},"TOLDO":{A:{i:15,a:7.5},B:{i:15,a:7.5}},
+  "SOBRELUZ":{A:{i:4,a:4},B:{i:4,a:4}},
+};
+
+// Función para obtener tarifa según depto
+const getRate = (dept) => dept==="sp" ? RATE_SP : RATE_FPC;
+const getProds = (dept) => Object.keys(dept==="sp" ? RATE_SP : RATE_FPC);
+
+// ───── DEPARTAMENTOS ─────
+const DEPTS = [
+  {id:"fpc",name:"FPC Instalaciones",icon:"🏗",color:"#3b82f6"},
+  {id:"sp", name:"Servi Persianas", icon:"🔧",color:"#f59e0b"},
+];
 
 // ───── PERSONAL ─────
 const INIT_INSTALADORES = [
@@ -54,6 +86,18 @@ const INIT_AYUDANTES = [
   {id:"A11",name:"ERICKSON MUY",cat:"B",on:true},
   {id:"A12",name:"JOSUE ALEJANDRO DONIS",cat:"B",on:true},
   {id:"A13",name:"RODOLFO MARTINEZ",cat:"B",on:true},
+];
+
+// ───── PERSONAL SERVI PERSIANAS ─────
+const INIT_INST_SP = [
+  {id:"SI01",name:"CESAR COBAR",cat:"B",on:true,defaultAyId:"SA01"},
+  {id:"SI02",name:"ELMER CONCUA",cat:"B",on:true,defaultAyId:"SA02"},
+  {id:"SI03",name:"HENRY BORRAYO",cat:"B",on:true,defaultAyId:"SA03"},
+];
+const INIT_AYUD_SP = [
+  {id:"SA01",name:"LUIS VASQUEZ",cat:"B",on:true},
+  {id:"SA02",name:"ELVIS OLIVAREZ",cat:"B",on:true},
+  {id:"SA03",name:"FREYBIN PACHECO",cat:"B",on:true},
 ];
 
 // ───── CRITERIOS SCORECARD (todos por número de eventos/faltas) ─────
@@ -120,9 +164,8 @@ const Q = n => `Q${(n||0).toLocaleString("es-GT",{minimumFractionDigits:2,maximu
 const N = n => (n||0).toLocaleString("es-GT",{maximumFractionDigits:2});
 const today = () => new Date().toISOString().split("T")[0];
 
-// Pagos calculados con cat de instalador y cat de ayudante por separado
-const cPay = (p,m,cI,cA) => {
-  const r = RATE[p]; if(!r) return {pi:0,pa:0};
+const cPay = (p,m,cI,cA,rateTable) => {
+  const r = (rateTable||{})[p]; if(!r) return {pi:0,pa:0};
   const tI = r[cI] || r.B;
   const tA = r[cA] || r.B;
   return { pi:+(m*tI.i).toFixed(2), pa:+(m*tA.a).toFixed(2) };
@@ -248,11 +291,12 @@ function ScoreCard({person,score,n,mt,onClick}){
 // ═══════════════════════════════════════════════════════════
 export default function App(){
   const [ok,setOk] = useState(false);
+  const [dept,setDept] = useState("fpc"); // "fpc" o "sp"
   const [inst,setInst] = useState([]);
   const [ayud,setAyud] = useState([]);
   const [recs,setRecs] = useState([]);
-  const [scores,setScores] = useState({});       // scores instaladores
-  const [scoresA,setScoresA] = useState({});     // scores ayudantes
+  const [scores,setScores] = useState({});
+  const [scoresA,setScoresA] = useState({});
   const [tab,setTab] = useState("dash");
   const [user,setUser] = useState(null);
   const [loginOpen,setLoginOpen] = useState(false);
@@ -260,21 +304,30 @@ export default function App(){
   const [loginPw,setLoginPw] = useState("");
   const [loginErr,setLoginErr] = useState("");
   const [mob,setMob] = useState(false);
-  const [detailPerson,setDetailPerson] = useState(null); // {kind:'inst'|'ayud', person}
+  const [detailPerson,setDetailPerson] = useState(null);
 
+  const RATE = getRate(dept);
+  const PRODS = getProds(dept);
+  const deptInfo = DEPTS.find(d=>d.id===dept);
+  const pfx = dept==="sp"?"sp11":"fpc11"; // prefijo para claves Firebase
+
+  // Cargar datos del departamento actual
   useEffect(()=>{(async()=>{
-    let i = await DB.get("fpc11-inst"), a = await DB.get("fpc11-ayud"), r = await DB.get("fpc11-r"), s = await DB.get("fpc11-s"), sa = await DB.get("fpc11-sa");
-    if(!i||!i.length){i=INIT_INSTALADORES; await DB.set("fpc11-inst",i)}
-    if(!a||!a.length){a=INIT_AYUDANTES; await DB.set("fpc11-ayud",a)}
+    setOk(false);
+    const defInst = dept==="sp"?INIT_INST_SP:INIT_INSTALADORES;
+    const defAyud = dept==="sp"?INIT_AYUD_SP:INIT_AYUDANTES;
+    let i = await DB.get(pfx+"-inst"), a = await DB.get(pfx+"-ayud"), r = await DB.get(pfx+"-r"), s = await DB.get(pfx+"-s"), sa = await DB.get(pfx+"-sa");
+    if(!i||!i.length){i=defInst; await DB.set(pfx+"-inst",i)}
+    if(!a||!a.length){a=defAyud; await DB.set(pfx+"-ayud",a)}
     a = a.map(x=>x.cat?x:{...x,cat:"B"});
     setInst(i); setAyud(a); setRecs(r||[]); setScores(s||{}); setScoresA(sa||{}); setOk(true);
-  })()},[]);
+  })()},[dept,pfx]);
 
-  const svI = useCallback(async v=>{setInst(v); await DB.set("fpc11-inst",v)},[]);
-  const svA = useCallback(async v=>{setAyud(v); await DB.set("fpc11-ayud",v)},[]);
-  const svR = useCallback(async v=>{setRecs(v); await DB.set("fpc11-r",v)},[]);
-  const svS = useCallback(async v=>{setScores(v); await DB.set("fpc11-s",v)},[]);
-  const svSA = useCallback(async v=>{setScoresA(v); await DB.set("fpc11-sa",v)},[]);
+  const svI = useCallback(async v=>{setInst(v); await DB.set(pfx+"-inst",v)},[pfx]);
+  const svA = useCallback(async v=>{setAyud(v); await DB.set(pfx+"-ayud",v)},[pfx]);
+  const svR = useCallback(async v=>{setRecs(v); await DB.set(pfx+"-r",v)},[pfx]);
+  const svS = useCallback(async v=>{setScores(v); await DB.set(pfx+"-s",v)},[pfx]);
+  const svSA = useCallback(async v=>{setScoresA(v); await DB.set(pfx+"-sa",v)},[pfx]);
 
   // Resumen por instalador (por nombre, ya que el record guarda nombre)
   // Solo registros habilitados para cálculos de pago
@@ -465,21 +518,38 @@ export default function App(){
 
     {/* SIDEBAR */}
     <div className="dsk" style={SB}>
-      <div style={{padding:"20px 16px 16px",textAlign:"center",borderBottom:"1px solid rgba(30,48,72,.3)"}}>
-        <img src="/logo-fpc.png" alt="FPC" style={{width:60,height:60,objectFit:"contain",marginBottom:8,opacity:.85}}/>
-        <div style={{fontSize:9,fontWeight:700,letterSpacing:3,color:"#d97706",marginBottom:2}}>SOLUCIONES DECORATIVAS</div>
-        <div style={{fontSize:12,fontWeight:800,color:"#f1f5f9",lineHeight:1.2}}>Control de Instalaciones</div>
+      <div style={{padding:"20px 16px 12px",textAlign:"center",borderBottom:"1px solid rgba(30,48,72,.3)"}}>
+        <img src="/logo-fpc.png" alt="FPC" style={{width:50,height:50,objectFit:"contain",marginBottom:6,opacity:.85}}/>
+        <div style={{fontSize:8,fontWeight:700,letterSpacing:3,color:"#d97706",marginBottom:2}}>SOLUCIONES DECORATIVAS</div>
+        <div style={{fontSize:11,fontWeight:800,color:"#f1f5f9",lineHeight:1.2}}>Control de Instalaciones</div>
       </div>
-      <div style={{padding:"8px 10px",flex:1,overflowY:"auto"}}>
-        {visTabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"10px 12px",borderRadius:10,border:"none",background:tab===t.id?"rgba(37,99,235,.12)":"transparent",color:tab===t.id?"#60a5fa":"#64748b",fontSize:12.5,fontWeight:tab===t.id?700:500,cursor:"pointer",marginBottom:2,textAlign:"left",fontFamily:"inherit"}}>
-          <span style={{width:20,textAlign:"center",fontSize:13,opacity:.7}}>{t.ic}</span>{t.l}
-          {t.money&&<span style={{marginLeft:"auto",fontSize:9,background:"rgba(245,158,11,.15)",color:"#fbbf24",padding:"2px 6px",borderRadius:99}}>🔒</span>}
-        </button>)}
+
+      <div style={{padding:"4px 6px",flex:1,overflowY:"auto"}}>
+        {visTabs.map(t=>{
+          const isActive = tab===t.id;
+          const hasDepts = !publicOnly && !t.publicAlso;
+          return <div key={t.id} style={{marginBottom:1}}>
+            <button onClick={()=>{setTab(t.id); if(!hasDepts) setTab(t.id)}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:8,border:"none",background:isActive?"rgba(37,99,235,.1)":"transparent",color:isActive?"#60a5fa":"#64748b",fontSize:12,fontWeight:isActive?700:500,cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
+              <span style={{width:18,textAlign:"center",fontSize:12,opacity:.7}}>{t.ic}</span>
+              <span style={{flex:1}}>{t.l}</span>
+              {t.money&&<span style={{fontSize:8,background:"rgba(245,158,11,.15)",color:"#fbbf24",padding:"1px 5px",borderRadius:99}}>🔒</span>}
+              {hasDepts && isActive && <span style={{fontSize:9,color:"#475569"}}>▾</span>}
+            </button>
+            {/* Sub-departamentos desplegables */}
+            {hasDepts && isActive && <div style={{paddingLeft:26,paddingBottom:4}}>
+              {DEPTS.map(d=><button key={d.id} onClick={()=>setDept(d.id)} style={{width:"100%",padding:"6px 10px",borderRadius:6,border:"none",background:dept===d.id?`${d.color}15`:"transparent",color:dept===d.id?d.color:"#475569",fontSize:11,fontWeight:dept===d.id?700:400,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:6,fontFamily:"inherit",marginBottom:1,transition:"all .15s"}}>
+                <span style={{fontSize:10}}>{d.icon}</span>{d.name}
+                {dept===d.id&&<span style={{marginLeft:"auto",fontSize:8}}>●</span>}
+              </button>)}
+            </div>}
+          </div>;
+        })}
       </div>
+
       <div style={{padding:"14px 14px",borderTop:"1px solid rgba(30,48,72,.4)"}}>
         <div style={{fontSize:11,color:"#34d399",fontWeight:600,marginBottom:4}}>● {user.name}</div>
         <button onClick={()=>{setUser(null);setLoginUser("");setLoginPw("");setLoginErr("")}} style={{width:"100%",padding:"6px 10px",borderRadius:8,border:"1px solid rgba(51,65,85,.4)",background:"transparent",color:"#64748b",fontSize:11,cursor:"pointer"}}>Cerrar sesión</button>
-        <div style={{fontSize:9,color:"#334155",marginTop:8}}>{recs.length} reg · {inst.length} inst · {ayud.length} ayud</div>
+        <div style={{fontSize:9,color:"#334155",marginTop:8}}>{deptInfo.icon} {deptInfo.name} · {recs.length} reg · {inst.length} inst · {ayud.length} ayud</div>
       </div>
     </div>
 
@@ -487,8 +557,19 @@ export default function App(){
     {mob&&<div className="mbo" style={{position:"fixed",inset:0,zIndex:200}}>
       <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.7)"}} onClick={()=>setMob(false)}/>
       <div style={{...SB,position:"relative",zIndex:1,width:270}}>
-        <div style={{padding:"20px 16px"}}><div style={{fontSize:10,fontWeight:800,letterSpacing:4,color:"#3b82f6"}}>GRUPO FPC</div><div style={{fontSize:14,fontWeight:800,color:"#f1f5f9"}}>Control Instalaciones</div></div>
-        <div style={{padding:"0 8px",flex:1,overflow:"auto"}}>{visTabs.map(t=><button key={t.id} onClick={()=>{setTab(t.id);setMob(false)}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:10,border:"none",background:tab===t.id?"rgba(37,99,235,.12)":"transparent",color:tab===t.id?"#60a5fa":"#64748b",fontSize:13,fontWeight:tab===t.id?700:500,cursor:"pointer",textAlign:"left"}}><span style={{width:20,textAlign:"center"}}>{t.ic}</span>{t.l}</button>)}</div>
+        <div style={{padding:"20px 16px"}}><div style={{fontSize:10,fontWeight:800,letterSpacing:4,color:"#d97706"}}>GRUPO FPC</div><div style={{fontSize:14,fontWeight:800,color:"#f1f5f9"}}>Control Instalaciones</div></div>
+        <div style={{padding:"0 6px",flex:1,overflow:"auto"}}>{visTabs.map(t=>{
+          const isActive = tab===t.id;
+          const hasDepts = !publicOnly && !t.publicAlso;
+          return <div key={t.id}>
+            <button onClick={()=>{setTab(t.id);if(!hasDepts)setMob(false)}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:10,border:"none",background:isActive?"rgba(37,99,235,.12)":"transparent",color:isActive?"#60a5fa":"#64748b",fontSize:13,fontWeight:isActive?700:500,cursor:"pointer",textAlign:"left"}}><span style={{width:20,textAlign:"center"}}>{t.ic}</span>{t.l}</button>
+            {hasDepts && isActive && <div style={{paddingLeft:32,paddingBottom:4}}>
+              {DEPTS.map(d=><button key={d.id} onClick={()=>{setDept(d.id);setMob(false)}} style={{width:"100%",padding:"7px 10px",borderRadius:6,border:"none",background:dept===d.id?`${d.color}15`:"transparent",color:dept===d.id?d.color:"#475569",fontSize:12,fontWeight:dept===d.id?700:400,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:6,fontFamily:"inherit",marginBottom:2}}>
+                <span>{d.icon}</span>{d.name}
+              </button>)}
+            </div>}
+          </div>;
+        })}</div>
       </div>
     </div>}
 
@@ -506,6 +587,7 @@ export default function App(){
       <div style={{background:"rgba(8,13,25,.9)",borderBottom:"1px solid rgba(30,48,72,.4)",padding:"10px 24px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:50}}>
         <button className="mbb" onClick={()=>setMob(true)} style={{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:20,padding:4}}>☰</button>
         <div style={{flex:1}}/>
+        {!publicOnly&&<span style={{fontSize:11,color:deptInfo.color,background:`${deptInfo.color}15`,padding:"4px 12px",borderRadius:99,border:`1px solid ${deptInfo.color}30`,fontWeight:700}}>{deptInfo.icon} {deptInfo.name}</span>}
         <span style={{fontSize:11,color:"#34d399",background:"rgba(5,150,105,.1)",padding:"4px 12px",borderRadius:99,border:"1px solid rgba(5,150,105,.2)",fontWeight:600}}>● {user.name}</span>
         <span style={{fontSize:11,color:"#334155"}}>{new Date().toLocaleDateString("es-GT",{day:"numeric",month:"long",year:"numeric"})}</span>
       </div>
@@ -513,13 +595,13 @@ export default function App(){
       <div style={{padding:"24px 28px",maxWidth:1440,margin:"0 auto"}} className="fu">
         {tab==="dash" && !publicOnly && <DashExecV inst={inst} ayud={ayud} recs={recs} scores={scores} scoresA={scoresA} cm={canMoney}/>}
         {tab==="dsc"  && <DashScoreV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} scores={scores} scoresA={scoresA} publicOnly={publicOnly} onPersonClick={(kind,person)=>setDetailPerson({kind,person})}/>}
-        {tab==="ing"  && !publicOnly && <IngV inst={inst} ayud={ayud} svI={svI} svA={svA} recs={recs} svR={svR} canEdit={canEdit} user={user}/>}
+        {tab==="ing"  && !publicOnly && <IngV inst={inst} ayud={ayud} svI={svI} svA={svA} recs={recs} svR={svR} canEdit={canEdit} user={user} RATE={RATE} PRODS={PRODS}/>}
         {tab==="ri"   && !publicOnly && <ResumenV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} cm={canMoney}/>}
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
         {tab==="sc"   && !publicOnly && <SCV inst={inst} ayud={ayud} scores={scores} svS={svS} scoresA={scoresA} svSA={svSA} bI={bI} bA={bA} canEdit={canEdit} recs={recs} svR={svR}/>}
         {tab==="adm"  && !publicOnly && <AdminV inst={inst} svI={svI} ayud={ayud} svA={svA} canEdit={canEdit} scores={scores} scoresA={scoresA}/>}
         {tab==="rep"  && canMoney && <ReportV inst={inst} ayud={ayud} recs={recs}/>}
-        {tab==="tb"   && !publicOnly && <TBV/>}
+        {tab==="tb"   && !publicOnly && <TBV RATE={RATE} PRODS={PRODS} deptInfo={deptInfo}/>}
         {tab==="pg"   && canMoney && <PGV inst={inst} ayud={ayud} bI={bI} bA={bA}/>}
       </div>
     </div>
@@ -770,7 +852,7 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
 // ═══════════════════════════════════════════════════════════
 // INGRESO DE METROS — instalador y ayudante 100% independientes
 // ═══════════════════════════════════════════════════════════
-function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user}){
+function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
   const aI = inst.filter(t=>t.on);
   const aA = ayud.filter(t=>t.on);
   const [selI,setSelI]=useState(""); const [selA,setSelA]=useState(""); const [selA2,setSelA2]=useState("");
@@ -1885,9 +1967,9 @@ function ReportV({inst,ayud,recs}){
 // ═══════════════════════════════════════════════════════════
 // TABLAS DE PAGO
 // ═══════════════════════════════════════════════════════════
-function TBV(){
+function TBV({RATE,PRODS,deptInfo}){
   return <div>
-    <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:"0 0 4px"}}>Tablas de Pago por Metro</h1>
+    <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:"0 0 4px"}}>Tablas de Pago por Metro — {deptInfo?.name||""}</h1>
     <p style={{fontSize:13,color:"#475569",margin:"0 0 20px"}}>Categoría A (Elite 125%) vs Categoría B (Estándar 100%)</p>
     <div className="card"><div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse"}}>
       <thead><tr>
@@ -1897,7 +1979,7 @@ function TBV(){
         <th className="th" style={{textAlign:"right",color:"#94a3b8"}}>B — Inst</th>
         <th className="th" style={{textAlign:"right",color:"#94a3b8"}}>B — Ayud</th>
       </tr></thead>
-      <tbody>{PRODS.map((p,i)=>{const r=RATE[p];return <tr key={p}>
+      <tbody>{PRODS.map((p,i)=>{const r=RATE[p];if(!r)return null;return <tr key={p}>
         <td className="td" style={{color:"#334155",fontWeight:700}}>{i+1}</td>
         <td className="td" style={{fontWeight:600}}>{p}</td>
         <td className="td" style={{textAlign:"right",color:"#10b981",fontWeight:700}}>{Q(r.A.i)}</td>
