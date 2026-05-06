@@ -313,16 +313,32 @@ export default function App(){
   const deptInfo = DEPTS.find(d=>d.id===dept);
   const pfx = dept==="sp"?"sp11":"fpc11"; // prefijo para claves Firebase
 
+  // Nombres que pertenecen a cada departamento (para limpieza)
+  const SP_INST_NAMES = INIT_INST_SP.map(x=>x.name);
+  const SP_AYUD_NAMES = INIT_AYUD_SP.map(x=>x.name);
+  const FPC_INST_NAMES = INIT_INSTALADORES.map(x=>x.name);
+  const FPC_AYUD_NAMES = INIT_AYUDANTES.map(x=>x.name);
+
   // Cargar datos del departamento actual
   useEffect(()=>{(async()=>{
     setOk(false);
     const defInst = dept==="sp"?INIT_INST_SP:INIT_INSTALADORES;
     const defAyud = dept==="sp"?INIT_AYUD_SP:INIT_AYUDANTES;
+    // Nombres del OTRO departamento para filtrar duplicados
+    const otherInstNames = dept==="sp"?FPC_INST_NAMES:SP_INST_NAMES;
+    const otherAyudNames = dept==="sp"?FPC_AYUD_NAMES:SP_AYUD_NAMES;
+
     let i = await DB.get(pfx+"-inst"), a = await DB.get(pfx+"-ayud"), r = await DB.get(pfx+"-r"), s = await DB.get(pfx+"-s"), sa = await DB.get(pfx+"-sa");
     if(!i||!i.length){i=defInst; await DB.set(pfx+"-inst",i)}
     if(!a||!a.length){a=defAyud; await DB.set(pfx+"-ayud",a)}
-    a = a.map(x=>x.cat?x:{...x,cat:"B"});
-    setInst(i); setAyud(a); setRecs(r||[]); setScores(s||{}); setScoresA(sa||{}); setOk(true);
+
+    // Limpiar: remover personas del otro departamento que se hayan mezclado
+    const iClean = i.filter(x=>!otherInstNames.includes(x.name));
+    const aClean = a.filter(x=>!otherAyudNames.includes(x.name)).map(x=>x.cat?x:{...x,cat:"B"});
+    if(iClean.length!==i.length) await DB.set(pfx+"-inst",iClean);
+    if(aClean.length!==a.length) await DB.set(pfx+"-ayud",aClean);
+
+    setInst(iClean); setAyud(aClean); setRecs(r||[]); setScores(s||{}); setScoresA(sa||{}); setOk(true);
   })()},[dept,pfx]);
 
   const svI = useCallback(async v=>{setInst(v); await DB.set(pfx+"-inst",v)},[pfx]);
