@@ -124,8 +124,10 @@ const USERS = {
   "admin":     {pw:"fpc2026",     name:"Administrador",        role:"admin",     canMoney:true,  canEdit:true,  publicOnly:false},
   "gerente":   {pw:"gerente2026", name:"Gerente Operaciones",  role:"gerente",   canMoney:true,  canEdit:true,  publicOnly:false},
   "diana":     {pw:"diana2026",   name:"Diana — Asistente",    role:"asistente", canMoney:false, canEdit:true,  publicOnly:false},
-  "instalador":{pw:"fpc123",      name:"Instalador",           role:"viewer",    canMoney:false, canEdit:false, publicOnly:true},
-  "ayudante":  {pw:"fpc123",      name:"Ayudante",             role:"viewer",    canMoney:false, canEdit:false, publicOnly:true},
+  "instalador":{pw:"fpc123",      name:"Instalador FPC",       role:"viewer",    canMoney:false, canEdit:false, publicOnly:true, dept:"fpc"},
+  "ayudante":  {pw:"fpc123",      name:"Ayudante FPC",         role:"viewer",    canMoney:false, canEdit:false, publicOnly:true, dept:"fpc"},
+  "tecnico":   {pw:"sp123",       name:"Técnico Servi Persianas", role:"viewer", canMoney:false, canEdit:false, publicOnly:true, dept:"sp"},
+  "ayudantesp":{pw:"sp123",       name:"Ayudante Servi Persianas",role:"viewer", canMoney:false, canEdit:false, publicOnly:true, dept:"sp"},
 };
 
 // ───── STORAGE — Firebase Firestore ─────
@@ -386,7 +388,10 @@ export default function App(){
     if(u && u.pw===loginPw){
       setUser({...u,uid:loginUser.toLowerCase().trim()});
       setLoginOpen(false); setLoginUser(""); setLoginPw(""); setLoginErr("");
-      setTab(u.publicOnly ? "dsc" : "dash");
+      if(u.publicOnly){
+        setTab("dsc");
+        if(u.dept) setDept(u.dept);
+      } else { setTab("dash"); }
     } else setLoginErr("Usuario o contraseña incorrectos");
   }
 
@@ -455,7 +460,7 @@ export default function App(){
 
         <div style={{marginBottom:16}}>
           <label style={{fontSize:10,fontWeight:700,color:"#94a3b8",display:"block",marginBottom:6,textTransform:"uppercase",letterSpacing:1}}>Usuario</label>
-          <input className="login-inp" value={loginUser} onChange={e=>setLoginUser(e.target.value)} placeholder="Ej: instalador, gerente, admin" autoFocus/>
+          <input className="login-inp" value={loginUser} onChange={e=>setLoginUser(e.target.value)} placeholder="Ej: instalador, tecnico, gerente, admin" autoFocus/>
         </div>
 
         <div style={{marginBottom:24}}>
@@ -527,7 +532,7 @@ export default function App(){
       <div style={{padding:"4px 6px",flex:1,overflowY:"auto"}}>
         {visTabs.map(t=>{
           const isActive = tab===t.id;
-          const hasDepts = !publicOnly && !t.publicAlso;
+          const hasDepts = !publicOnly;
           return <div key={t.id} style={{marginBottom:1}}>
             <button onClick={()=>{setTab(t.id); if(!hasDepts) setTab(t.id)}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:8,border:"none",background:isActive?"rgba(37,99,235,.1)":"transparent",color:isActive?"#60a5fa":"#64748b",fontSize:12,fontWeight:isActive?700:500,cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
               <span style={{width:18,textAlign:"center",fontSize:12,opacity:.7}}>{t.ic}</span>
@@ -560,7 +565,7 @@ export default function App(){
         <div style={{padding:"20px 16px"}}><div style={{fontSize:10,fontWeight:800,letterSpacing:4,color:"#d97706"}}>GRUPO FPC</div><div style={{fontSize:14,fontWeight:800,color:"#f1f5f9"}}>Control Instalaciones</div></div>
         <div style={{padding:"0 6px",flex:1,overflow:"auto"}}>{visTabs.map(t=>{
           const isActive = tab===t.id;
-          const hasDepts = !publicOnly && !t.publicAlso;
+          const hasDepts = !publicOnly;
           return <div key={t.id}>
             <button onClick={()=>{setTab(t.id);if(!hasDepts)setMob(false)}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 12px",borderRadius:10,border:"none",background:isActive?"rgba(37,99,235,.12)":"transparent",color:isActive?"#60a5fa":"#64748b",fontSize:13,fontWeight:isActive?700:500,cursor:"pointer",textAlign:"left"}}><span style={{width:20,textAlign:"center"}}>{t.ic}</span>{t.l}</button>
             {hasDepts && isActive && <div style={{paddingLeft:32,paddingBottom:4}}>
