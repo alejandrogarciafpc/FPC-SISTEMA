@@ -296,7 +296,9 @@ function getCurrentPeriod(){
 // ───── COMPONENTES UI ─────
 function Cat({c,lg}){
   const a=c==="A";
-  return <span style={{padding:lg?"5px 16px":"3px 10px",borderRadius:99,fontSize:lg?13:10,fontWeight:800,letterSpacing:1,background:a?"rgba(16,185,129,.12)":"rgba(100,116,139,.12)",color:a?"#34d399":"#94a3b8",border:`1px solid ${a?"rgba(16,185,129,.25)":"rgba(100,116,139,.2)"}`,whiteSpace:"nowrap"}}>{a?"★ ELITE":"ESTÁNDAR"}</span>;
+  // ELITE (A): dorado/amarillo (más distintivo)
+  // ESTÁNDAR (B): gris/azul (neutro)
+  return <span style={{padding:lg?"5px 16px":"3px 10px",borderRadius:99,fontSize:lg?13:10,fontWeight:800,letterSpacing:1,background:a?"rgba(245,158,11,.15)":"rgba(100,116,139,.12)",color:a?"#fbbf24":"#94a3b8",border:`1px solid ${a?"rgba(245,158,11,.4)":"rgba(100,116,139,.2)"}`,whiteSpace:"nowrap"}}>{a?"★ ELITE A":"ESTÁNDAR B"}</span>;
 }
 
 function KPI({label,value,sub,accent,icon}){
@@ -323,22 +325,48 @@ function HBar({data,color="#3b82f6"}){
 }
 
 // Tarjeta de scorecard grande (para dashboard) — clic abre detalle
-function ScoreCard({person,score,avg3,avg6,n,mt,onClick}){
-  const c = score===null?"#475569":score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444";
+// score = score del periodo actual (mes en curso)
+// prevScore = score del mes anterior (cerrado)
+// avg3 = promedio últimos 3 meses
+function ScoreCard({person,score,prevScore,avg3,n,mt,onClick}){
+  const isElite = person.cat==="A";
+  // Colores del score (umbral más estricto para A que para B)
+  const c = score===null ? "#475569"
+    : isElite ? (score>=100?"#10b981":score>=90?"#f59e0b":"#ef4444")
+    : (score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444");
+  const cp = prevScore===null||prevScore===undefined?"#475569":prevScore>=85?"#10b981":prevScore>=60?"#f59e0b":"#ef4444";
   const ca3 = avg3===null||avg3===undefined?"#475569":avg3>=85?"#10b981":avg3>=60?"#f59e0b":"#ef4444";
-  const ca6 = avg6===null||avg6===undefined?"#475569":avg6>=85?"#10b981":avg6>=60?"#f59e0b":"#ef4444";
-  return <button onClick={onClick} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"rgba(15,23,42,.6)",borderRadius:12,border:`1px solid ${c}25`,cursor:"pointer",textAlign:"left",width:"100%",transition:"all .2s",fontFamily:"inherit"}}
-    onMouseEnter={e=>{e.currentTarget.style.background="rgba(15,23,42,.9)";e.currentTarget.style.transform="translateY(-2px)"}}
-    onMouseLeave={e=>{e.currentTarget.style.background="rgba(15,23,42,.6)";e.currentTarget.style.transform="translateY(0)"}}>
+
+  // Borde especial dorado para ELITE
+  const borderStyle = isElite
+    ? `2px solid rgba(245,158,11,.35)`
+    : `1px solid ${c}25`;
+
+  // Texto de exigencia
+  const exigText = isElite ? "★ Tolerancia 0 errores" : "Tolerancia: 1-3 según criterio";
+  const exigColor = isElite ? "#fbbf24" : "#94a3b8";
+
+  return <button onClick={onClick} style={{
+    display:"flex",alignItems:"center",gap:14,padding:"14px 16px",
+    background: isElite ? "linear-gradient(135deg,rgba(245,158,11,.04),rgba(15,23,42,.6))" : "rgba(15,23,42,.6)",
+    borderRadius:12,border:borderStyle,cursor:"pointer",textAlign:"left",width:"100%",
+    transition:"all .2s",fontFamily:"inherit",position:"relative"
+  }}
+    onMouseEnter={e=>{e.currentTarget.style.background=isElite?"linear-gradient(135deg,rgba(245,158,11,.08),rgba(15,23,42,.9))":"rgba(15,23,42,.9)";e.currentTarget.style.transform="translateY(-2px)"}}
+    onMouseLeave={e=>{e.currentTarget.style.background=isElite?"linear-gradient(135deg,rgba(245,158,11,.04),rgba(15,23,42,.6))":"rgba(15,23,42,.6)";e.currentTarget.style.transform="translateY(0)"}}>
+    {/* Estrella en esquina si es ELITE */}
+    {isElite && <div style={{position:"absolute",top:6,right:8,fontSize:14,color:"#fbbf24"}}>★</div>}
+
     <div style={{width:54,height:54,borderRadius:12,background:`${c}15`,color:c,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,fontWeight:900,flexShrink:0,border:`2px solid ${c}30`}}>{score!==null?score:"—"}</div>
     <div style={{flex:1,minWidth:0}}>
       <div style={{fontSize:13,fontWeight:800,color:"#f1f5f9",marginBottom:2}}>{person.name}</div>
       <div style={{fontSize:10,color:"#64748b",marginBottom:6}}>{n} inst · {N(mt)} mts</div>
-      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
         <Cat c={person.cat}/>
+        {(prevScore!==null&&prevScore!==undefined) && <span title="Score del mes anterior (cerrado)" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${cp}15`,color:cp,fontWeight:700,border:`1px solid ${cp}30`}}>Mes ant: {prevScore}</span>}
         {(avg3!==null&&avg3!==undefined) && <span title="Promedio últimos 3 meses" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${ca3}15`,color:ca3,fontWeight:700,border:`1px solid ${ca3}30`}}>3M: {avg3}</span>}
-        {(avg6!==null&&avg6!==undefined) && <span title="Promedio últimos 6 meses" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${ca6}15`,color:ca6,fontWeight:700,border:`1px solid ${ca6}30`}}>6M: {avg6}</span>}
       </div>
+      <div style={{fontSize:9,color:exigColor,fontWeight:600,letterSpacing:.3}}>{exigText}</div>
     </div>
   </button>;
 }
@@ -899,13 +927,16 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
   const [mes,setMes] = useState(cur.mes);
   const [anio,setAnio] = useState(cur.anio);
 
-  // Score del periodo seleccionado + promedios
+  // Calcular mes anterior (para el "Mes ant:" en cada tarjeta)
+  const prevMes = mes === 0 ? 11 : mes - 1;
+  const prevAnio = mes === 0 ? anio - 1 : anio;
+
+  // Score del periodo seleccionado + mes anterior + promedio 3 meses
   const scInst = inst.filter(t=>t.on).map(t=>({
     ...t,
     score: getScoreByPeriod(scores,t.id,inst,mes,anio),
-    scoreHist: getScore(scores,t.id,inst),
+    prevScore: getScoreByPeriod(scores,t.id,inst,prevMes,prevAnio),
     avg3: getScoreAverage(scores,t.id,inst,mes,anio,3),
-    avg6: getScoreAverage(scores,t.id,inst,mes,anio,6),
     mt: bI[t.name]?.mt||0,
     n: bI[t.name]?.n||0
   })).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
@@ -913,9 +944,8 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
   const scAyud = ayud.filter(t=>t.on).map(t=>({
     ...t,
     score: getScoreByPeriod(scoresA,t.id,ayud,mes,anio),
-    scoreHist: getScore(scoresA,t.id,ayud),
+    prevScore: getScoreByPeriod(scoresA,t.id,ayud,prevMes,prevAnio),
     avg3: getScoreAverage(scoresA,t.id,ayud,mes,anio,3),
-    avg6: getScoreAverage(scoresA,t.id,ayud,mes,anio,6),
     mt: bA[t.name]?.mt||0,
     n: bA[t.name]?.n||0
   })).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
@@ -928,13 +958,13 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
     if(!vals.length) return null;
     return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
   },[scInst]);
-  const teamAvg3 = useMemo(()=>{
-    const vals = scInst.map(t=>t.avg3).filter(s=>s!==null);
+  const teamPrevScore = useMemo(()=>{
+    const vals = scInst.map(t=>t.prevScore).filter(s=>s!==null);
     if(!vals.length) return null;
     return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
   },[scInst]);
-  const teamAvg6 = useMemo(()=>{
-    const vals = scInst.map(t=>t.avg6).filter(s=>s!==null);
+  const teamAvg3 = useMemo(()=>{
+    const vals = scInst.map(t=>t.avg3).filter(s=>s!==null);
     if(!vals.length) return null;
     return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
   },[scInst]);
@@ -964,21 +994,21 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
     </div>
 
     {/* KPIs DE PROMEDIOS DEL EQUIPO */}
-    {(teamScoreNow!==null || teamAvg3!==null || teamAvg6!==null) && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginBottom:18}}>
+    {(teamScoreNow!==null || teamPrevScore!==null || teamAvg3!==null) && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginBottom:18}}>
       {teamScoreNow!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
         <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio del Mes</div>
         <div style={{fontSize:26,fontWeight:900,color:teamScoreNow>=85?"#34d399":teamScoreNow>=60?"#fbbf24":"#f87171"}}>{teamScoreNow}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
         <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Instaladores · {MESES[mes]}</div>
       </div>}
+      {teamPrevScore!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
+        <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Mes Anterior</div>
+        <div style={{fontSize:26,fontWeight:900,color:teamPrevScore>=85?"#34d399":teamPrevScore>=60?"#fbbf24":"#f87171"}}>{teamPrevScore}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
+        <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{MESES[prevMes]} {prevAnio}</div>
+      </div>}
       {teamAvg3!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
         <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio 3 Meses</div>
         <div style={{fontSize:26,fontWeight:900,color:teamAvg3>=85?"#34d399":teamAvg3>=60?"#fbbf24":"#f87171"}}>{teamAvg3}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
         <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Últimos 3 periodos</div>
-      </div>}
-      {teamAvg6!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
-        <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio 6 Meses</div>
-        <div style={{fontSize:26,fontWeight:900,color:teamAvg6>=85?"#34d399":teamAvg6>=60?"#fbbf24":"#f87171"}}>{teamAvg6}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
-        <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Últimos 6 periodos</div>
       </div>}
     </div>}
 
@@ -986,7 +1016,7 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
       <div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Scorecard Instaladores — {MESES[mes]} {anio}</div>
       <div style={{padding:18}}>
         {scInst.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-          {scInst.map(t=><ScoreCard key={t.id} person={t} score={t.score} avg3={t.avg3} avg6={t.avg6} n={t.n} mt={t.mt} onClick={()=>onPersonClick("inst",t)}/>)}
+          {scInst.map(t=><ScoreCard key={t.id} person={t} score={t.score} prevScore={t.prevScore} avg3={t.avg3} n={t.n} mt={t.mt} onClick={()=>onPersonClick("inst",t)}/>)}
         </div>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:13}}>Sin instaladores activos</div>}
       </div>
     </div>
@@ -995,7 +1025,7 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
       <div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Scorecard Ayudantes — {MESES[mes]} {anio}</div>
       <div style={{padding:18}}>
         {scAyud.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-          {scAyud.map(t=><ScoreCard key={t.id} person={t} score={t.score} avg3={t.avg3} avg6={t.avg6} n={t.n} mt={t.mt} onClick={()=>onPersonClick("ayud",t)}/>)}
+          {scAyud.map(t=><ScoreCard key={t.id} person={t} score={t.score} prevScore={t.prevScore} avg3={t.avg3} n={t.n} mt={t.mt} onClick={()=>onPersonClick("ayud",t)}/>)}
         </div>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:13}}>Sin ayudantes activos</div>}
       </div>
     </div>
