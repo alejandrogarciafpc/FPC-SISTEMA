@@ -208,25 +208,74 @@ function getScore(sd, tid, list){
   return cnt ? Math.round(tot/cnt) : null;
 }
 
+// Score filtrado por periodo (mes-año específico)
+// Cuenta solo los eventos cuya fecha cae dentro del periodo 25-25
+function getScoreByPeriod(sd, tid, list, mesIdx, anio){
+  const t = list.find(x=>x.id===tid); if(!t) return null;
+  // Calcular rango del periodo
+  const startMonth = mesIdx === 0 ? 11 : mesIdx - 1;
+  const startYear  = mesIdx === 0 ? anio - 1 : anio;
+  const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
+  const end   = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
+
+  let tot=0, cnt=0;
+  CRIT.forEach(c=>{
+    const events = getCritEvents(sd,tid,c.id);
+    // Solo contar eventos del periodo
+    const v = events.filter(ev => ev.date && ev.date >= start && ev.date <= end).length;
+    const mx = t.cat==="A"?c.A:c.B;
+    if(v === 0) { tot += 100; }
+    else if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
+    else { tot += Math.max(0, 100 - (mx * 25) - ((v - mx) * 25)); }
+    cnt++;
+  });
+  return cnt ? Math.round(tot/cnt) : null;
+}
+
+// Promedio de scores de los últimos N meses (incluye el periodo actual)
+function getScoreAverage(sd, tid, list, mesIdx, anio, numMonths){
+  const scores = [];
+  let m = mesIdx, y = anio;
+  for(let i=0; i<numMonths; i++){
+    const s = getScoreByPeriod(sd, tid, list, m, y);
+    if(s !== null) scores.push(s);
+    // Retroceder un mes
+    m = m - 1;
+    if(m < 0){ m = 11; y--; }
+  }
+  if(!scores.length) return null;
+  return Math.round(scores.reduce((a,b)=>a+b,0) / scores.length);
+}
+
+// Eventos contados por criterio dentro de un periodo (para mostrar en scorecard)
+function getCritValueByPeriod(sd, tid, cid, mesIdx, anio){
+  const events = getCritEvents(sd,tid,cid);
+  const startMonth = mesIdx === 0 ? 11 : mesIdx - 1;
+  const startYear  = mesIdx === 0 ? anio - 1 : anio;
+  const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
+  const end   = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
+  return events.filter(ev => ev.date && ev.date >= start && ev.date <= end).length;
+}
+
 // ───── PERÍODOS MENSUALES (25 al 25) ─────
 const MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
-// Período "Marzo 2026" = 25 Feb 2026 → 25 Mar 2026
+// Período "Mayo 2026" = 26 Abr 2026 → 25 May 2026 (el 25 cierra a las 23:59 del periodo)
 // mesIdx: 0=Enero, 1=Febrero...
 function getPeriodRange(mesIdx, anio){
-  // Inicio: día 25 del mes ANTERIOR
+  // Inicio: día 26 del mes ANTERIOR (el 25 anterior ya pertenece al mes anterior)
   const startMonth = mesIdx === 0 ? 11 : mesIdx - 1;
   const startYear  = mesIdx === 0 ? anio - 1 : anio;
-  const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-25`;
-  // Fin: día 25 del mes actual
+  const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
+  // Fin: día 25 del mes actual (INCLUSIVE — el 25 cierra el periodo a las 23:59)
   const end = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
-  return { start, end, label: `${MESES[mesIdx]} ${anio}`, labelCorto: `25/${startMonth+1<10?"0":""}${startMonth+1} — 25/${mesIdx+1<10?"0":""}${mesIdx+1}/${anio}` };
+  return { start, end, label: `${MESES[mesIdx]} ${anio}`, labelCorto: `26/${startMonth+1<10?"0":""}${startMonth+1} — 25/${mesIdx+1<10?"0":""}${mesIdx+1}/${anio}` };
 }
 
-// Filtrar registros por período (fecha >= start AND fecha < end)
+// Filtrar registros por período (fecha >= start AND fecha <= end — el 25 incluido)
 function filterByPeriod(recs, mesIdx, anio){
   const { start, end } = getPeriodRange(mesIdx, anio);
-  return recs.filter(r => r.dt >= start && r.dt < end);
+  return recs.filter(r => r.dt >= start && r.dt <= end);
 }
 
 // Obtener período actual basado en la fecha de hoy
@@ -235,9 +284,9 @@ function getCurrentPeriod(){
   const d = hoy.getDate();
   let m = hoy.getMonth(); // 0-indexed
   let y = hoy.getFullYear();
-  // Si estamos antes del 25, el período actual es este mes
-  // Si estamos el 25 o después, el período actual es el próximo mes
-  if(d >= 25){
+  // El día 25 ES el último día del periodo actual (cierra a las 23:59)
+  // A partir del día 26 ya empieza el siguiente periodo
+  if(d > 25){
     m = m + 1;
     if(m > 11){ m = 0; y++; }
   }
@@ -274,8 +323,10 @@ function HBar({data,color="#3b82f6"}){
 }
 
 // Tarjeta de scorecard grande (para dashboard) — clic abre detalle
-function ScoreCard({person,score,n,mt,onClick}){
+function ScoreCard({person,score,avg3,avg6,n,mt,onClick}){
   const c = score===null?"#475569":score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444";
+  const ca3 = avg3===null||avg3===undefined?"#475569":avg3>=85?"#10b981":avg3>=60?"#f59e0b":"#ef4444";
+  const ca6 = avg6===null||avg6===undefined?"#475569":avg6>=85?"#10b981":avg6>=60?"#f59e0b":"#ef4444";
   return <button onClick={onClick} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",background:"rgba(15,23,42,.6)",borderRadius:12,border:`1px solid ${c}25`,cursor:"pointer",textAlign:"left",width:"100%",transition:"all .2s",fontFamily:"inherit"}}
     onMouseEnter={e=>{e.currentTarget.style.background="rgba(15,23,42,.9)";e.currentTarget.style.transform="translateY(-2px)"}}
     onMouseLeave={e=>{e.currentTarget.style.background="rgba(15,23,42,.6)";e.currentTarget.style.transform="translateY(0)"}}>
@@ -283,7 +334,11 @@ function ScoreCard({person,score,n,mt,onClick}){
     <div style={{flex:1,minWidth:0}}>
       <div style={{fontSize:13,fontWeight:800,color:"#f1f5f9",marginBottom:2}}>{person.name}</div>
       <div style={{fontSize:10,color:"#64748b",marginBottom:6}}>{n} inst · {N(mt)} mts</div>
-      <Cat c={person.cat}/>
+      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+        <Cat c={person.cat}/>
+        {(avg3!==null&&avg3!==undefined) && <span title="Promedio últimos 3 meses" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${ca3}15`,color:ca3,fontWeight:700,border:`1px solid ${ca3}30`}}>3M: {avg3}</span>}
+        {(avg6!==null&&avg6!==undefined) && <span title="Promedio últimos 6 meses" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${ca6}15`,color:ca6,fontWeight:700,border:`1px solid ${ca6}30`}}>6M: {avg6}</span>}
+      </div>
     </div>
   </button>;
 }
@@ -840,8 +895,54 @@ function DashExecV({inst,ayud,recs,scores,scoresA,cm}){
 // DASHBOARD SCORECARD — vista para instaladores/ayudantes + calendario
 // ═══════════════════════════════════════════════════════════
 function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClick}){
-  const scInst = inst.filter(t=>t.on).map(t=>({...t,score:getScore(scores,t.id,inst),mt:bI[t.name]?.mt||0,n:bI[t.name]?.n||0})).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
-  const scAyud = ayud.filter(t=>t.on).map(t=>({...t,score:getScore(scoresA,t.id,ayud),mt:bA[t.name]?.mt||0,n:bA[t.name]?.n||0})).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
+  const cur = getCurrentPeriod();
+  const [mes,setMes] = useState(cur.mes);
+  const [anio,setAnio] = useState(cur.anio);
+
+  // Score del periodo seleccionado + promedios
+  const scInst = inst.filter(t=>t.on).map(t=>({
+    ...t,
+    score: getScoreByPeriod(scores,t.id,inst,mes,anio),
+    scoreHist: getScore(scores,t.id,inst),
+    avg3: getScoreAverage(scores,t.id,inst,mes,anio,3),
+    avg6: getScoreAverage(scores,t.id,inst,mes,anio,6),
+    mt: bI[t.name]?.mt||0,
+    n: bI[t.name]?.n||0
+  })).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
+
+  const scAyud = ayud.filter(t=>t.on).map(t=>({
+    ...t,
+    score: getScoreByPeriod(scoresA,t.id,ayud,mes,anio),
+    scoreHist: getScore(scoresA,t.id,ayud),
+    avg3: getScoreAverage(scoresA,t.id,ayud,mes,anio,3),
+    avg6: getScoreAverage(scoresA,t.id,ayud,mes,anio,6),
+    mt: bA[t.name]?.mt||0,
+    n: bA[t.name]?.n||0
+  })).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
+
+  const years = useMemo(()=>{const s=new Set([anio]);recs.forEach(r=>{if(r.dt)s.add(parseInt(r.dt.substring(0,4)))});return[...s].sort()},[recs,anio]);
+
+  // Promedios globales del equipo en el periodo
+  const teamScoreNow = useMemo(()=>{
+    const vals = scInst.map(t=>t.score).filter(s=>s!==null);
+    if(!vals.length) return null;
+    return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  },[scInst]);
+  const teamAvg3 = useMemo(()=>{
+    const vals = scInst.map(t=>t.avg3).filter(s=>s!==null);
+    if(!vals.length) return null;
+    return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  },[scInst]);
+  const teamAvg6 = useMemo(()=>{
+    const vals = scInst.map(t=>t.avg6).filter(s=>s!==null);
+    if(!vals.length) return null;
+    return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  },[scInst]);
+
+  function prevMonth(){if(mes===0){setMes(11);setAnio(anio-1)}else setMes(mes-1)}
+  function nextMonth(){if(mes===11){setMes(0);setAnio(anio+1)}else setMes(mes+1)}
+
+  const isCurrentMonth = mes===cur.mes && anio===cur.anio;
 
   return <div>
     <div style={{marginBottom:20}}>
@@ -850,20 +951,51 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
       <p style={{fontSize:13,color:"#64748b",margin:"6px 0 0"}}>Haz clic en tu nombre para ver el detalle de tu scorecard</p>
     </div>
 
+    {/* SELECTOR DE PERIODO */}
+    <div className="card" style={{marginBottom:14,padding:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+      <button className="btn bg" onClick={prevMonth}>◀</button>
+      <select className="sel" value={mes} onChange={e=>setMes(parseInt(e.target.value))} style={{width:140}}>{MESES.map((m,i)=><option key={i} value={i}>{m}</option>)}</select>
+      <select className="sel" value={anio} onChange={e=>setAnio(parseInt(e.target.value))} style={{width:100}}>{years.map(y=><option key={y} value={y}>{y}</option>)}</select>
+      <button className="btn bg" onClick={nextMonth}>▶</button>
+      <div style={{flex:1,textAlign:"right",fontSize:12,color:"#64748b"}}>
+        Periodo: <b style={{color:"#cbd5e1"}}>{getPeriodRange(mes,anio).labelCorto}</b>
+        {isCurrentMonth && <span style={{marginLeft:8,padding:"2px 8px",background:"rgba(16,185,129,.1)",color:"#34d399",borderRadius:99,fontSize:10,fontWeight:700}}>● PERIODO ACTUAL</span>}
+      </div>
+    </div>
+
+    {/* KPIs DE PROMEDIOS DEL EQUIPO */}
+    {(teamScoreNow!==null || teamAvg3!==null || teamAvg6!==null) && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginBottom:18}}>
+      {teamScoreNow!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
+        <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio del Mes</div>
+        <div style={{fontSize:26,fontWeight:900,color:teamScoreNow>=85?"#34d399":teamScoreNow>=60?"#fbbf24":"#f87171"}}>{teamScoreNow}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
+        <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Instaladores · {MESES[mes]}</div>
+      </div>}
+      {teamAvg3!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
+        <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio 3 Meses</div>
+        <div style={{fontSize:26,fontWeight:900,color:teamAvg3>=85?"#34d399":teamAvg3>=60?"#fbbf24":"#f87171"}}>{teamAvg3}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
+        <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Últimos 3 periodos</div>
+      </div>}
+      {teamAvg6!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
+        <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio 6 Meses</div>
+        <div style={{fontSize:26,fontWeight:900,color:teamAvg6>=85?"#34d399":teamAvg6>=60?"#fbbf24":"#f87171"}}>{teamAvg6}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
+        <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Últimos 6 periodos</div>
+      </div>}
+    </div>}
+
     <div className="card" style={{marginBottom:18}}>
-      <div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Scorecard Instaladores</div>
+      <div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Scorecard Instaladores — {MESES[mes]} {anio}</div>
       <div style={{padding:18}}>
         {scInst.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-          {scInst.map(t=><ScoreCard key={t.id} person={t} score={t.score} n={t.n} mt={t.mt} onClick={()=>onPersonClick("inst",t)}/>)}
+          {scInst.map(t=><ScoreCard key={t.id} person={t} score={t.score} avg3={t.avg3} avg6={t.avg6} n={t.n} mt={t.mt} onClick={()=>onPersonClick("inst",t)}/>)}
         </div>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:13}}>Sin instaladores activos</div>}
       </div>
     </div>
 
     <div className="card" style={{marginBottom:18}}>
-      <div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Scorecard Ayudantes</div>
+      <div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Scorecard Ayudantes — {MESES[mes]} {anio}</div>
       <div style={{padding:18}}>
         {scAyud.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-          {scAyud.map(t=><ScoreCard key={t.id} person={t} score={t.score} n={t.n} mt={t.mt} onClick={()=>onPersonClick("ayud",t)}/>)}
+          {scAyud.map(t=><ScoreCard key={t.id} person={t} score={t.score} avg3={t.avg3} avg6={t.avg6} n={t.n} mt={t.mt} onClick={()=>onPersonClick("ayud",t)}/>)}
         </div>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:13}}>Sin ayudantes activos</div>}
       </div>
     </div>
