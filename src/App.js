@@ -675,7 +675,7 @@ export default function App(){
         {tab==="ri"   && !publicOnly && <ResumenV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} cm={canMoney}/>}
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
         {tab==="sc"   && !publicOnly && <SCV inst={inst} ayud={ayud} scores={scores} svS={svS} scoresA={scoresA} svSA={svSA} bI={bI} bA={bA} canEdit={canEdit} recs={recs} svR={svR}/>}
-        {tab==="adm"  && !publicOnly && <AdminV inst={inst} svI={svI} ayud={ayud} svA={svA} canEdit={canEdit} scores={scores} scoresA={scoresA}/>}
+        {tab==="adm"  && !publicOnly && <AdminV inst={inst} svI={svI} ayud={ayud} svA={svA} canEdit={canEdit} scores={scores} scoresA={scoresA} recs={recs} svR={svR} RATE={RATE}/>}
         {tab==="rep"  && canMoney && <ReportV inst={inst} ayud={ayud} recs={recs}/>}
         {tab==="tb"   && !publicOnly && <TBV RATE={RATE} PRODS={PRODS} deptInfo={deptInfo}/>}
         {tab==="pg"   && canMoney && <PGV inst={inst} ayud={ayud} bI={bI} bA={bA}/>}
@@ -1652,7 +1652,7 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
 // - ASCENDER ayudante → instalador
 // - Asignar ayudante por defecto a cada instalador
 // ═══════════════════════════════════════════════════════════
-function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA}){
+function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA,recs,svR,RATE}){
   const [sub,setSub] = useState("inst");
   const [showAddI,setShowAddI] = useState(false);
   const [showAddA,setShowAddA] = useState(false);
@@ -1660,6 +1660,7 @@ function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA}){
   const [assignFor,setAssignFor] = useState(null); // instalador id para asignar ayudante
   const [confirmDel,setConfirmDel] = useState(null); // {kind, item}
   const [promoteAy,setPromoteAy] = useState(null); // ayudante a ascender
+  const [confirmCatChange,setConfirmCatChange] = useState(null); // {kind, person, newCat, affectedRecs}
 
   function addInst(){
     const n=newName.trim().toUpperCase(); if(!n)return;
@@ -1671,10 +1672,78 @@ function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA}){
     svA([...ayud,{id:"A"+Date.now().toString(36),name:n,cat:newCat,on:true}]);
     setNewName("");setNewCat("B");setShowAddA(false);
   }
+
+  // Nuevo: pide confirmación antes de cambiar categoría
   function toggleCat(kind,id){
-    if(kind==="i") svI(inst.map(x=>x.id===id?{...x,cat:x.cat==="A"?"B":"A"}:x));
-    else svA(ayud.map(x=>x.id===id?{...x,cat:x.cat==="A"?"B":"A"}:x));
+    const list = kind==="i" ? inst : ayud;
+    const person = list.find(x=>x.id===id);
+    if(!person) return;
+    const newCat = person.cat==="A" ? "B" : "A";
+
+    // Calcular cuántos registros del periodo actual se afectarán
+    const cur = getCurrentPeriod();
+    const { start, end } = getPeriodRange(cur.mes, cur.anio);
+    const name = person.name;
+    const affectedRecs = recs.filter(r=>{
+      if(r.disabled) return false;
+      if(r.dt < start || r.dt > end) return false;
+      if(kind==="i") return r.i===name;
+      return r.a===name || r.a2===name;
+    });
+
+    if(affectedRecs.length === 0){
+      // No hay registros del periodo, solo cambiar la categoría sin recalcular nada
+      if(kind==="i") svI(inst.map(x=>x.id===id?{...x,cat:newCat}:x));
+      else svA(ayud.map(x=>x.id===id?{...x,cat:newCat}:x));
+      return;
+    }
+
+    // Mostrar modal de confirmación
+    setConfirmCatChange({kind,person,newCat,affectedRecs});
   }
+
+  // Aplicar el cambio de categoría + recalcular pagos del periodo actual
+  function applyCatChange(){
+    if(!confirmCatChange) return;
+    const {kind,person,newCat,affectedRecs} = confirmCatChange;
+
+    // 1. Cambiar la categoría en la persona
+    if(kind==="i") svI(inst.map(x=>x.id===person.id?{...x,cat:newCat}:x));
+    else svA(ayud.map(x=>x.id===person.id?{...x,cat:newCat}:x));
+
+    // 2. Recalcular pagos de los registros afectados
+    const affectedIds = new Set(affectedRecs.map(r=>r.id));
+    const newRecs = recs.map(r=>{
+      if(!affectedIds.has(r.id)) return r;
+      const ml = r.ml || 0;
+      const prod = r.p;
+      const rate = RATE[prod];
+      if(!rate) return r;
+
+      if(kind==="i" && r.i===person.name){
+        // Actualizar categoría del instalador y recalcular pago
+        const pi = +(ml * (rate[newCat]?.i || 0)).toFixed(2);
+        return {...r, cI:newCat, pi};
+      } else if(kind==="a"){
+        // Actualizar ayudante (puede ser 'a' o 'a2')
+        let next = {...r};
+        if(r.a === person.name){
+          const pa = +(ml * (rate[newCat]?.a || 0)).toFixed(2);
+          next = {...next, cA:newCat, pa};
+        }
+        if(r.a2 === person.name){
+          const pa2 = +(ml * (rate[newCat]?.a || 0)).toFixed(2);
+          next = {...next, cA2:newCat, pa2};
+        }
+        return next;
+      }
+      return r;
+    });
+
+    svR(newRecs);
+    setConfirmCatChange(null);
+  }
+
   function toggleOn(kind,id){
     if(kind==="i") svI(inst.map(x=>x.id===id?{...x,on:!x.on}:x));
     else svA(ayud.map(x=>x.id===id?{...x,on:!x.on}:x));
@@ -1795,6 +1864,37 @@ function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA}){
         </div>
         <div style={{padding:"14px 24px",borderTop:"1px solid rgba(30,48,72,.5)"}}>
           <button className="btn bg" onClick={()=>setAssignFor(null)} style={{width:"100%"}}>Cerrar</button>
+        </div>
+      </div>
+    </div>}
+
+    {/* MODAL CONFIRMAR CAMBIO DE CATEGORÍA */}
+    {confirmCatChange && <div className="modalBg" onClick={()=>setConfirmCatChange(null)}>
+      <div className="card" style={{padding:0,width:520,maxWidth:"95vw"}} onClick={e=>e.stopPropagation()}>
+        <div style={{padding:"20px 24px",borderBottom:"1px solid rgba(30,48,72,.5)"}}>
+          <div style={{fontSize:17,fontWeight:800,color:confirmCatChange.newCat==="A"?"#10b981":"#f59e0b"}}>
+            {confirmCatChange.newCat==="A"?"↑ Subir a Elite (A)":"↓ Bajar a Estándar (B)"}
+          </div>
+        </div>
+        <div style={{padding:"20px 24px"}}>
+          <p style={{fontSize:14,color:"#cbd5e1",marginBottom:14,lineHeight:1.6}}>
+            <b style={{color:"#f1f5f9"}}>{confirmCatChange.person.name}</b> cambiará de categoría <b style={{color:confirmCatChange.person.cat==="A"?"#10b981":"#f59e0b"}}>{confirmCatChange.person.cat}</b> a <b style={{color:confirmCatChange.newCat==="A"?"#10b981":"#f59e0b"}}>{confirmCatChange.newCat}</b>.
+          </p>
+          <div style={{padding:"12px 14px",background:"rgba(15,23,42,.5)",borderRadius:10,marginBottom:14,border:"1px solid rgba(245,158,11,.2)"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#fbbf24",textTransform:"uppercase",letterSpacing:.5,marginBottom:6}}>⚠ Recalculo automático</div>
+            <div style={{fontSize:12.5,color:"#cbd5e1",lineHeight:1.6}}>
+              Se recalcularán los pagos de <b style={{color:"#fbbf24"}}>{confirmCatChange.affectedRecs.length} registro(s)</b> del periodo actual ({getPeriodRange(getCurrentPeriod().mes,getCurrentPeriod().anio).labelCorto}) con la nueva tarifa.
+            </div>
+            <div style={{fontSize:11,color:"#64748b",marginTop:8,fontStyle:"italic"}}>
+              ✓ Los registros de meses anteriores (ya cerrados) NO se modifican.
+            </div>
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button className="btn bs" onClick={applyCatChange} style={{flex:1}}>
+              ✓ Confirmar y Recalcular
+            </button>
+            <button className="btn bg" onClick={()=>setConfirmCatChange(null)}>Cancelar</button>
+          </div>
         </div>
       </div>
     </div>}
