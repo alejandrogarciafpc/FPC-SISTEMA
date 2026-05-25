@@ -209,45 +209,23 @@ function getScore(sd, tid, list){
 }
 
 // Score filtrado por periodo (mes-año específico)
-// Cuenta solo los eventos cuya fecha cae dentro del periodo 25-25
+// Misma lógica que getScore() (solo promedia criterios documentados) pero filtrando por fecha 25-25.
+// Si NO hay eventos en el periodo → 100 (mes limpio = perfecto). NUNCA devuelve null.
 function getScoreByPeriod(sd, tid, list, mesIdx, anio){
-  const t = list.find(x=>x.id===tid); if(!t) return null;
+  const t = list.find(x=>x.id===tid); if(!t) return 100;
   // Calcular rango del periodo
   const startMonth = mesIdx === 0 ? 11 : mesIdx - 1;
   const startYear  = mesIdx === 0 ? anio - 1 : anio;
   const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
   const end   = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
 
-  const personData = sd[tid];
-  if(!personData) return null;
-
   // Determinar si este es el periodo actual
   const cur = getCurrentPeriod();
   const isCurrentPeriod = (mesIdx === cur.mes && anio === cur.anio);
 
-  // Contar eventos del periodo
-  // REGLA: si un evento NO tiene fecha, se asume que es del periodo ACTUAL
-  // (porque es la primera vez que se usa el sistema)
-  let hayDatosEnPeriodo = false;
-  CRIT.forEach(c=>{
-    const events = getCritEvents(sd,tid,c.id);
-    const eventsEnPeriodo = events.filter(ev => {
-      if(!ev.date) return isCurrentPeriod; // sin fecha = mes actual
-      return ev.date >= start && ev.date <= end;
-    });
-    // También considerar el campo value directo (formato viejo)
-    const directValue = getCritValue(sd,tid,c.id);
-    if(eventsEnPeriodo.length > 0) hayDatosEnPeriodo = true;
-    if(isCurrentPeriod && directValue !== undefined && directValue !== 0 && events.length === 0) {
-      // Formato viejo (sin events[]) en periodo actual
-      hayDatosEnPeriodo = true;
-    }
-  });
-
-  // Si no hay eventos documentados en este periodo, devolver null
-  if(!hayDatosEnPeriodo) return null;
-
-  // Calcular el score
+  // Para cada criterio, contar SOLO eventos del periodo. Si el criterio tiene >0 eventos
+  // en el periodo, se incluye en el promedio. Si tiene 0 eventos, se ignora (igual que getScore).
+  // Eventos sin fecha (formato viejo) se asumen del periodo actual.
   let tot=0, cnt=0;
   CRIT.forEach(c=>{
     const events = getCritEvents(sd,tid,c.id);
@@ -255,32 +233,37 @@ function getScoreByPeriod(sd, tid, list, mesIdx, anio){
       if(!ev.date) return isCurrentPeriod;
       return ev.date >= start && ev.date <= end;
     }).length;
-    // Si no hay events[] pero hay value directo (formato viejo), usarlo en periodo actual
+    // Formato viejo: campo value sin events[]. Solo cuenta en periodo actual.
     if(events.length === 0 && isCurrentPeriod) {
       const directValue = getCritValue(sd,tid,c.id);
-      if(directValue !== undefined) v = directValue;
+      if(directValue !== undefined && directValue > 0) v = directValue;
     }
+    // Solo incluir el criterio si tuvo eventos en este periodo (misma lógica que getScore)
+    if(v === 0) return;
     const mx = t.cat==="A"?c.A:c.B;
-    if(v === 0) { tot += 100; }
-    else if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
+    if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
     else { tot += Math.max(0, 100 - (mx * 25) - ((v - mx) * 25)); }
     cnt++;
   });
-  return cnt ? Math.round(tot/cnt) : null;
+  // Sin eventos en el periodo = mes limpio = 100 (verde perfecto)
+  if(cnt === 0) return 100;
+  return Math.round(tot/cnt);
 }
 
 // Promedio de scores de los últimos N meses (incluye el periodo actual)
+// Como getScoreByPeriod ya no devuelve null (devuelve 100 cuando no hay eventos),
+// el promedio incluye todos los meses solicitados.
 function getScoreAverage(sd, tid, list, mesIdx, anio, numMonths){
   const scores = [];
   let m = mesIdx, y = anio;
   for(let i=0; i<numMonths; i++){
     const s = getScoreByPeriod(sd, tid, list, m, y);
-    if(s !== null) scores.push(s);
+    if(s !== null && s !== undefined) scores.push(s);
     // Retroceder un mes
     m = m - 1;
     if(m < 0){ m = 11; y--; }
   }
-  if(!scores.length) return null;
+  if(!scores.length) return 100;
   return Math.round(scores.reduce((a,b)=>a+b,0) / scores.length);
 }
 
