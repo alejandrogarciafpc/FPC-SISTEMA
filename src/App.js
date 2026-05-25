@@ -218,11 +218,48 @@ function getScoreByPeriod(sd, tid, list, mesIdx, anio){
   const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
   const end   = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
 
+  const personData = sd[tid];
+  if(!personData) return null;
+
+  // Determinar si este es el periodo actual
+  const cur = getCurrentPeriod();
+  const isCurrentPeriod = (mesIdx === cur.mes && anio === cur.anio);
+
+  // Contar eventos del periodo
+  // REGLA: si un evento NO tiene fecha, se asume que es del periodo ACTUAL
+  // (porque es la primera vez que se usa el sistema)
+  let hayDatosEnPeriodo = false;
+  CRIT.forEach(c=>{
+    const events = getCritEvents(sd,tid,c.id);
+    const eventsEnPeriodo = events.filter(ev => {
+      if(!ev.date) return isCurrentPeriod; // sin fecha = mes actual
+      return ev.date >= start && ev.date <= end;
+    });
+    // También considerar el campo value directo (formato viejo)
+    const directValue = getCritValue(sd,tid,c.id);
+    if(eventsEnPeriodo.length > 0) hayDatosEnPeriodo = true;
+    if(isCurrentPeriod && directValue !== undefined && directValue !== 0 && events.length === 0) {
+      // Formato viejo (sin events[]) en periodo actual
+      hayDatosEnPeriodo = true;
+    }
+  });
+
+  // Si no hay eventos documentados en este periodo, devolver null
+  if(!hayDatosEnPeriodo) return null;
+
+  // Calcular el score
   let tot=0, cnt=0;
   CRIT.forEach(c=>{
     const events = getCritEvents(sd,tid,c.id);
-    // Solo contar eventos del periodo
-    const v = events.filter(ev => ev.date && ev.date >= start && ev.date <= end).length;
+    let v = events.filter(ev => {
+      if(!ev.date) return isCurrentPeriod;
+      return ev.date >= start && ev.date <= end;
+    }).length;
+    // Si no hay events[] pero hay value directo (formato viejo), usarlo en periodo actual
+    if(events.length === 0 && isCurrentPeriod) {
+      const directValue = getCritValue(sd,tid,c.id);
+      if(directValue !== undefined) v = directValue;
+    }
     const mx = t.cat==="A"?c.A:c.B;
     if(v === 0) { tot += 100; }
     else if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
@@ -326,7 +363,7 @@ function HBar({data,color="#3b82f6"}){
 
 // Tarjeta de scorecard grande (para dashboard) — clic abre detalle
 // score = score del periodo actual (mes en curso)
-// prevScore = score del mes anterior (cerrado)
+// prevScore = score del mes anterior (cerrado) — null si no hay datos
 // avg3 = promedio últimos 3 meses
 function ScoreCard({person,score,prevScore,avg3,n,mt,onClick}){
   const isElite = person.cat==="A";
@@ -334,8 +371,13 @@ function ScoreCard({person,score,prevScore,avg3,n,mt,onClick}){
   const c = score===null ? "#475569"
     : isElite ? (score>=100?"#10b981":score>=90?"#f59e0b":"#ef4444")
     : (score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444");
-  const cp = prevScore===null||prevScore===undefined?"#475569":prevScore>=85?"#10b981":prevScore>=60?"#f59e0b":"#ef4444";
-  const ca3 = avg3===null||avg3===undefined?"#475569":avg3>=85?"#10b981":avg3>=60?"#f59e0b":"#ef4444";
+  // Si no hay datos del mes anterior, mostramos 0 con color gris (no se midió)
+  const prevDisplay = (prevScore===null||prevScore===undefined) ? 0 : prevScore;
+  const prevHasData = prevScore!==null && prevScore!==undefined;
+  const cp = !prevHasData ? "#64748b" : prevScore>=85?"#10b981":prevScore>=60?"#f59e0b":"#ef4444";
+
+  const avg3Display = (avg3===null||avg3===undefined) ? null : avg3;
+  const ca3 = avg3Display===null?"#64748b":avg3Display>=85?"#10b981":avg3Display>=60?"#f59e0b":"#ef4444";
 
   // Borde especial dorado para ELITE
   const borderStyle = isElite
@@ -363,8 +405,8 @@ function ScoreCard({person,score,prevScore,avg3,n,mt,onClick}){
       <div style={{fontSize:10,color:"#64748b",marginBottom:6}}>{n} inst · {N(mt)} mts</div>
       <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:4}}>
         <Cat c={person.cat}/>
-        {(prevScore!==null&&prevScore!==undefined) && <span title="Score del mes anterior (cerrado)" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${cp}15`,color:cp,fontWeight:700,border:`1px solid ${cp}30`}}>Mes ant: {prevScore}</span>}
-        {(avg3!==null&&avg3!==undefined) && <span title="Promedio últimos 3 meses" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${ca3}15`,color:ca3,fontWeight:700,border:`1px solid ${ca3}30`}}>3M: {avg3}</span>}
+        <span title={prevHasData?"Score del mes anterior (cerrado)":"Sin datos del mes anterior"} style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${cp}15`,color:cp,fontWeight:700,border:`1px solid ${cp}30`}}>Mes ant: {prevDisplay}</span>
+        {avg3Display!==null && <span title="Promedio últimos 3 meses con datos" style={{fontSize:9,padding:"2px 7px",borderRadius:99,background:`${ca3}15`,color:ca3,fontWeight:700,border:`1px solid ${ca3}30`}}>3M: {avg3Display}</span>}
       </div>
       <div style={{fontSize:9,color:exigColor,fontWeight:600,letterSpacing:.3}}>{exigText}</div>
     </div>
