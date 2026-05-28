@@ -212,7 +212,6 @@ function getScore(sd, tid, list){
 // Cuenta solo los eventos cuya fecha cae dentro del periodo 25-25
 function getScoreByPeriod(sd, tid, list, mesIdx, anio){
   const t = list.find(x=>x.id===tid); if(!t) return null;
-  // Calcular rango del periodo
   const startMonth = mesIdx === 0 ? 11 : mesIdx - 1;
   const startYear  = mesIdx === 0 ? anio - 1 : anio;
   const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
@@ -221,45 +220,44 @@ function getScoreByPeriod(sd, tid, list, mesIdx, anio){
   const personData = sd[tid];
   if(!personData) return null;
 
-  // Determinar si este es el periodo actual
   const cur = getCurrentPeriod();
   const isCurrentPeriod = (mesIdx === cur.mes && anio === cur.anio);
 
-  // Contar eventos del periodo
-  // REGLA: si un evento NO tiene fecha, se asume que es del periodo ACTUAL
-  // (porque es la primera vez que se usa el sistema)
-  let hayDatosEnPeriodo = false;
-  CRIT.forEach(c=>{
-    const events = getCritEvents(sd,tid,c.id);
-    const eventsEnPeriodo = events.filter(ev => {
-      if(!ev.date) return isCurrentPeriod; // sin fecha = mes actual
-      return ev.date >= start && ev.date <= end;
-    });
-    // También considerar el campo value directo (formato viejo)
-    const directValue = getCritValue(sd,tid,c.id);
-    if(eventsEnPeriodo.length > 0) hayDatosEnPeriodo = true;
-    if(isCurrentPeriod && directValue !== undefined && directValue !== 0 && events.length === 0) {
-      // Formato viejo (sin events[]) en periodo actual
-      hayDatosEnPeriodo = true;
+  // Helper: contar eventos del criterio en el periodo
+  function countEventsForCrit(cid) {
+    const events = getCritEvents(sd, tid, cid);
+    const directValue = getCritValue(sd, tid, cid);
+
+    // Eventos CON fecha en el periodo
+    const withDate = events.filter(ev => ev.date && ev.date >= start && ev.date <= end);
+
+    // Eventos SIN fecha (formato viejo) → cuentan al periodo actual
+    const withoutDate = events.filter(ev => !ev.date);
+
+    let count = withDate.length;
+
+    if(isCurrentPeriod) {
+      count += withoutDate.length;
+      // Si NO hay events[] en absoluto pero SÍ hay value directo (formato muy viejo), usarlo
+      if(events.length === 0 && directValue !== undefined && directValue > 0) {
+        count = directValue;
+      }
     }
+
+    return count;
+  }
+
+  // Verificar si hay datos
+  let hayDatos = false;
+  CRIT.forEach(c=>{
+    if(countEventsForCrit(c.id) > 0) hayDatos = true;
   });
+  if(!hayDatos) return null;
 
-  // Si no hay eventos documentados en este periodo, devolver null
-  if(!hayDatosEnPeriodo) return null;
-
-  // Calcular el score
+  // Calcular score
   let tot=0, cnt=0;
   CRIT.forEach(c=>{
-    const events = getCritEvents(sd,tid,c.id);
-    let v = events.filter(ev => {
-      if(!ev.date) return isCurrentPeriod;
-      return ev.date >= start && ev.date <= end;
-    }).length;
-    // Si no hay events[] pero hay value directo (formato viejo), usarlo en periodo actual
-    if(events.length === 0 && isCurrentPeriod) {
-      const directValue = getCritValue(sd,tid,c.id);
-      if(directValue !== undefined) v = directValue;
-    }
+    const v = countEventsForCrit(c.id);
     const mx = t.cat==="A"?c.A:c.B;
     if(v === 0) { tot += 100; }
     else if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
@@ -1626,7 +1624,6 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
         <div className="card-h"><span style={{color:oc}}>◎</span> Criterios — {MESES[mes]} {anio} — Categoría {tm.cat} ({tm.cat==="A"?"Cero tolerancia":"Tolerancia limitada"})</div>
         <div>
         {CRIT.map(c=>{
-          // Filtrar eventos del periodo seleccionado
           const allEvents = getCritEvents(sd, sel, c.id);
           const directValue = getCritValue(sd, sel, c.id);
           const startMonth = mes === 0 ? 11 : mes - 1;
@@ -1634,23 +1631,29 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
           const periodStart = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
           const periodEnd = `${anio}-${String(mes+1).padStart(2,"0")}-25`;
 
-          const events = allEvents.filter(ev=>{
-            if(!ev.date) return isCurrentMonth; // sin fecha = mes actual
-            return ev.date >= periodStart && ev.date <= periodEnd;
-          });
-          // Si no hay events[] pero hay value directo, mostrarlo en periodo actual
-          let v = events.length;
-          if(allEvents.length === 0 && isCurrentMonth && directValue !== undefined) {
-            v = directValue;
+          // Eventos CON fecha del periodo
+          const eventsWithDate = allEvents.filter(ev => ev.date && ev.date >= periodStart && ev.date <= periodEnd);
+          // Eventos SIN fecha (formato viejo) → cuentan al periodo actual
+          const eventsWithoutDate = allEvents.filter(ev => !ev.date);
+
+          // Lista de eventos a mostrar (combinada)
+          const events = isCurrentMonth ? [...eventsWithDate, ...eventsWithoutDate] : eventsWithDate;
+
+          // Calcular el conteo total
+          let v = eventsWithDate.length;
+          if(isCurrentMonth) {
+            v += eventsWithoutDate.length;
+            // Si NO hay events[] pero SÍ value directo (formato muy viejo)
+            if(allEvents.length === 0 && directValue !== undefined && directValue > 0) {
+              v = directValue;
+            }
           }
 
           const mx = tm.cat==="A"?c.A:c.B;
-          let ic="⚪",cl="#475569";
-          if(v > 0 || (allEvents.length === 0 && isCurrentMonth && directValue !== undefined)){
-            if(c.cnt){ic=v===0?"🟢":v<=mx?"🟡":"🔴"; cl=v===0?"#10b981":v<=mx?"#f59e0b":"#ef4444"}
+          let ic="🟢",cl="#10b981";
+          if(v > 0){
+            if(c.cnt){ic=v<=mx?"🟡":"🔴"; cl=v<=mx?"#f59e0b":"#ef4444"}
             else{ic=v>=mx?"🟢":v>=mx*.8?"🟡":"🔴"; cl=v>=mx?"#10b981":v>=mx*.8?"#f59e0b":"#ef4444"}
-          } else if(v === 0) {
-            ic="🟢"; cl="#10b981";
           }
           return <div key={c.id} style={{padding:"14px 18px",borderBottom:"1px solid rgba(30,48,72,.3)"}}>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
