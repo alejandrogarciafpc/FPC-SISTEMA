@@ -100,22 +100,32 @@ const INIT_AYUD_SP = [
   {id:"SA03",name:"FREYBIN PACHECO",cat:"B",on:true},
 ];
 
-// ───── CRITERIOS SCORECARD (todos por número de eventos/faltas) ─────
+// ───── SCORECARD: PESOS POR GRAVEDAD ─────
+// Cada criterio tiene un nivel (grave/medio/leve). Cada falta resta segun su peso.
+// Si la falta EXCEDE la tolerancia del criterio (Elite A=0 / Estandar B=su maximo),
+// esa falta cuenta DOBLE. El score nunca baja del PISO_MIN.
+const PESOS = { grave:17, medio:14, leve:10 };  // ajustables
+const PISO_MIN = 0;                              // cambiar a 10 si no quieres ceros absolutos
+
+// Color del score (umbral unico y estricto)
+const scoreColor = s => (s===null||s===undefined) ? "#475569" : s>=90 ? "#10b981" : s>=70 ? "#f59e0b" : "#ef4444";
+
+// ───── CRITERIOS SCORECARD (nivel: grave=cuesta dinero/clientes, medio=servicio, leve=papeleo) ─────
 const CRIT = [
-  {id:"c1",l:"Errores de Medición",d:"Cero errores atribuibles al técnico",A:0,B:3,cnt:true},
-  {id:"c2",l:"Errores de Instalación",d:"Cero errores atribuibles",A:0,B:3,cnt:true},
-  {id:"c3",l:"Retrabajos",d:"Cero retrabajos atribuibles",A:0,B:3,cnt:true},
-  {id:"c4",l:"Garantías",d:"Cero garantías por mala instalación",A:0,B:2,cnt:true},
-  {id:"c5",l:"Reclamos de Cliente",d:"Cero reclamos formales",A:0,B:1,cnt:true},
-  {id:"c6",l:"Llamadas de Atención",d:"Cero llamadas vigentes",A:0,B:1,cnt:true},
-  {id:"c7",l:"Proceso de Llamadas",d:"No llamó inicio ruta / no avisó retraso",A:0,B:2,cnt:true},
-  {id:"c8",l:"Evidencia Fotográfica",d:"No entregó evidencia fotográfica",A:0,B:2,cnt:true},
-  {id:"c9",l:"Constancia Firmada",d:"No entregó constancia firmada",A:0,B:2,cnt:true},
-  {id:"c10",l:"Liquidación Viáticos",d:"No liquidó viáticos en tiempo",A:0,B:2,cnt:true},
-  {id:"c11",l:"Disciplina y Orden",d:"Falta de uniforme, panel sucio, herramientas",A:0,B:2,cnt:true},
-  {id:"c12",l:"Servicio al Cliente",d:"Mal trato, no limpió, no explicó producto",A:0,B:2,cnt:true},
-  {id:"c13",l:"Revisión de Material",d:"No verificó material antes de ruta",A:0,B:2,cnt:true},
-  {id:"c14",l:"Checklist de Instalación",d:"No cumplió nivelación, fijación o funcionamiento",A:0,B:2,cnt:true},
+  {id:"c1", l:"Errores de Medición",     d:"Cero errores atribuibles al técnico",        A:0,B:3,cnt:true, nivel:"grave"},
+  {id:"c2", l:"Errores de Instalación",  d:"Cero errores atribuibles",                   A:0,B:3,cnt:true, nivel:"grave"},
+  {id:"c3", l:"Retrabajos",              d:"Cero retrabajos atribuibles",                A:0,B:3,cnt:true, nivel:"grave"},
+  {id:"c4", l:"Garantías",               d:"Cero garantías por mala instalación",        A:0,B:2,cnt:true, nivel:"grave"},
+  {id:"c5", l:"Reclamos de Cliente",     d:"Cero reclamos formales",                     A:0,B:1,cnt:true, nivel:"grave"},
+  {id:"c6", l:"Llamadas de Atención",    d:"Cero llamadas vigentes",                     A:0,B:1,cnt:true, nivel:"grave"},
+  {id:"c7", l:"Proceso de Llamadas",     d:"No llamó inicio ruta / no avisó retraso",    A:0,B:2,cnt:true, nivel:"medio"},
+  {id:"c8", l:"Evidencia Fotográfica",   d:"No entregó evidencia fotográfica",           A:0,B:2,cnt:true, nivel:"leve"},
+  {id:"c9", l:"Constancia Firmada",      d:"No entregó constancia firmada",              A:0,B:2,cnt:true, nivel:"leve"},
+  {id:"c10",l:"Liquidación Viáticos",    d:"No liquidó viáticos en tiempo",              A:0,B:2,cnt:true, nivel:"leve"},
+  {id:"c11",l:"Disciplina y Orden",      d:"Falta de uniforme, panel sucio, herramientas",A:0,B:2,cnt:true, nivel:"leve"},
+  {id:"c12",l:"Servicio al Cliente",     d:"Mal trato, no limpió, no explicó producto",  A:0,B:2,cnt:true, nivel:"medio"},
+  {id:"c13",l:"Revisión de Material",    d:"No verificó material antes de ruta",         A:0,B:2,cnt:true, nivel:"medio"},
+  {id:"c14",l:"Checklist de Instalación",d:"No cumplió nivelación, fijación o funcionamiento",A:0,B:2,cnt:true, nivel:"medio"},
 ];
 
 // ───── USUARIOS ─────
@@ -218,7 +228,7 @@ function getScoreByPeriod(sd, tid, list, mesIdx, anio){
   const end   = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
 
   const personData = sd[tid];
-  if(!personData) return null;
+  if(!personData) return 100;  // sin ningun evento documentado = limpio = 100
 
   const cur = getCurrentPeriod();
   const isCurrentPeriod = (mesIdx === cur.mes && anio === cur.anio);
@@ -247,24 +257,26 @@ function getScoreByPeriod(sd, tid, list, mesIdx, anio){
     return count;
   }
 
-  // Verificar si hay datos
+  // Sin faltas en el periodo = 100 (limpio = perfecto). Antes devolvia null y mostraba "—".
   let hayDatos = false;
   CRIT.forEach(c=>{
     if(countEventsForCrit(c.id) > 0) hayDatos = true;
   });
-  if(!hayDatos) return null;
+  if(!hayDatos) return 100;
 
-  // Calcular score
-  let tot=0, cnt=0;
+  // Calcular score — PESOS POR GRAVEDAD: 100 menos penalizacion segun nivel de cada falta
+  // Cada falta resta su peso (grave/medio/leve). Las faltas que exceden la tolerancia cuentan doble.
+  let penalidad = 0;
   CRIT.forEach(c=>{
     const v = countEventsForCrit(c.id);
+    if(v === 0) return;
     const mx = t.cat==="A"?c.A:c.B;
-    if(v === 0) { tot += 100; }
-    else if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
-    else { tot += Math.max(0, 100 - (mx * 25) - ((v - mx) * 25)); }
-    cnt++;
+    const peso = PESOS[c.nivel] || PESOS.leve;
+    const dentro = Math.min(v, mx);      // faltas dentro de la tolerancia
+    const exceso = Math.max(0, v - mx);  // faltas que exceden la tolerancia → doble
+    penalidad += dentro * peso + exceso * peso * 2;
   });
-  return cnt ? Math.round(tot/cnt) : null;
+  return Math.max(PISO_MIN, 100 - penalidad);
 }
 
 // Promedio de scores de los últimos N meses (incluye el periodo actual)
@@ -365,17 +377,15 @@ function HBar({data,color="#3b82f6"}){
 // avg3 = promedio últimos 3 meses
 function ScoreCard({person,score,prevScore,avg3,n,mt,onClick}){
   const isElite = person.cat==="A";
-  // Colores del score (umbral más estricto para A que para B)
-  const c = score===null ? "#475569"
-    : isElite ? (score>=100?"#10b981":score>=90?"#f59e0b":"#ef4444")
-    : (score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444");
+  // Color del score (umbral unico estricto; el modelo duro ya castiga mas al Elite via doble penalizacion)
+  const c = scoreColor(score);
   // Si no hay datos del mes anterior, mostramos 0 con color gris (no se midió)
   const prevDisplay = (prevScore===null||prevScore===undefined) ? 0 : prevScore;
   const prevHasData = prevScore!==null && prevScore!==undefined;
-  const cp = !prevHasData ? "#64748b" : prevScore>=85?"#10b981":prevScore>=60?"#f59e0b":"#ef4444";
+  const cp = !prevHasData ? "#64748b" : scoreColor(prevScore);
 
   const avg3Display = (avg3===null||avg3===undefined) ? null : avg3;
-  const ca3 = avg3Display===null?"#64748b":avg3Display>=85?"#10b981":avg3Display>=60?"#f59e0b":"#ef4444";
+  const ca3 = avg3Display===null?"#64748b":scoreColor(avg3Display);
 
   // Borde especial dorado para ELITE
   const borderStyle = isElite
@@ -723,6 +733,8 @@ export default function App(){
       person={detailPerson.person}
       scores={detailPerson.kind==="inst"?scores:scoresA}
       bData={detailPerson.kind==="inst"?bI[detailPerson.person.name]:bA[detailPerson.person.name]}
+      mes={detailPerson.mes}
+      anio={detailPerson.anio}
       onClose={()=>setDetailPerson(null)}
     />}
 
@@ -738,7 +750,7 @@ export default function App(){
 
       <div style={{padding:"24px 28px",maxWidth:1440,margin:"0 auto"}} className="fu">
         {tab==="dash" && !publicOnly && <DashExecV inst={inst} ayud={ayud} recs={recs} scores={scores} scoresA={scoresA} cm={canMoney}/>}
-        {tab==="dsc"  && <DashScoreV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} scores={scores} scoresA={scoresA} publicOnly={publicOnly} onPersonClick={(kind,person)=>setDetailPerson({kind,person})}/>}
+        {tab==="dsc"  && <DashScoreV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} scores={scores} scoresA={scoresA} publicOnly={publicOnly} onPersonClick={(kind,person,mes,anio)=>setDetailPerson({kind,person,mes,anio})}/>}
         {tab==="ing"  && !publicOnly && <IngV inst={inst} ayud={ayud} svI={svI} svA={svA} recs={recs} svR={svR} canEdit={canEdit} user={user} RATE={RATE} PRODS={PRODS}/>}
         {tab==="ri"   && !publicOnly && <ResumenV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} cm={canMoney}/>}
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
@@ -756,9 +768,20 @@ export default function App(){
 // MODAL DETALLE DE PERSONA — clic en nombre del scorecard
 // Muestra el desglose del score con eventos documentados
 // ═══════════════════════════════════════════════════════════
-function PersonDetailModal({kind,person,scores,bData,onClose}){
-  const score = getScore(scores, person.id, [person]);
-  const c = score===null?"#475569":score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444";
+function PersonDetailModal({kind,person,scores,bData,mes,anio,onClose}){
+  // Periodo seleccionado (26 del mes anterior → 25 del mes actual)
+  const m = (typeof mes==="number") ? mes : getCurrentPeriod().mes;
+  const y = (typeof anio==="number") ? anio : getCurrentPeriod().anio;
+  const startMonth = m === 0 ? 11 : m - 1;
+  const startYear  = m === 0 ? y - 1 : y;
+  const periodStart = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
+  const periodEnd   = `${y}-${String(m+1).padStart(2,"0")}-25`;
+  const cur = getCurrentPeriod();
+  const isCurrentMonth = (m===cur.mes && y===cur.anio);
+
+  // Score del PERIODO con la misma formula dura del tile (un solo numero en todo el sistema)
+  const score = getScoreByPeriod(scores, person.id, [person], m, y);
+  const c = scoreColor(score);
 
   return <div className="modalBg" onClick={onClose}>
     <div className="card" style={{padding:0,width:760,maxWidth:"95vw",maxHeight:"90vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
@@ -769,26 +792,30 @@ function PersonDetailModal({kind,person,scores,bData,onClose}){
           <div style={{fontSize:18,fontWeight:900,color:"#f1f5f9",marginBottom:4}}>{person.name}</div>
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             <Cat c={person.cat} lg/>
-            {bData&&<span style={{fontSize:11,color:"#64748b"}}>{bData.n} instalaciones · {N(bData.mt)} mts</span>}
+            {(person.n!==undefined||bData)&&<span style={{fontSize:11,color:"#64748b"}}>{person.n!==undefined?person.n:bData.n} instalaciones · {N(person.mt!==undefined?person.mt:bData.mt)} mts</span>}
+            <span style={{fontSize:11,color:"#94a3b8",fontWeight:700}}>· {MESES[m]} {y}</span>
           </div>
         </div>
         <button onClick={onClose} style={{background:"none",border:"none",color:"#64748b",fontSize:24,cursor:"pointer",padding:4}}>✕</button>
       </div>
 
       <div style={{padding:"20px 24px"}}>
-        <div style={{fontSize:13,fontWeight:700,color:"#f1f5f9",marginBottom:12}}>Detalle del Scorecard</div>
+        <div style={{fontSize:13,fontWeight:700,color:"#f1f5f9",marginBottom:12}}>Detalle del Scorecard — {MESES[m]} {y}</div>
         <div style={{fontSize:11,color:"#64748b",marginBottom:14,padding:"10px 14px",background:"rgba(15,23,42,.4)",borderRadius:8,lineHeight:1.6}}>
-          Aquí puedes ver cada criterio evaluado y, en los criterios donde tuviste eventos negativos, el detalle de qué cotización, fecha y cliente afectó tu puntaje.
+          Cada falta resta según su gravedad (grave −{PESOS.grave}, medio −{PESOS.medio}, leve −{PESOS.leve}); si excede la tolerancia del criterio, cuenta doble. Aquí puedes ver qué cotización, fecha y cliente afectó tu puntaje.
         </div>
 
         {CRIT.map(crit=>{
-          const v = getCritValue(scores, person.id, crit.id);
-          const events = getCritEvents(scores, person.id, crit.id);
+          const allEvents = getCritEvents(scores, person.id, crit.id);
+          // Eventos del PERIODO seleccionado (por fecha). Los sin fecha cuentan solo en el periodo actual.
+          const eventsWithDate = allEvents.filter(ev => ev.date && ev.date >= periodStart && ev.date <= periodEnd);
+          const eventsWithoutDate = allEvents.filter(ev => !ev.date);
+          const events = isCurrentMonth ? [...eventsWithDate, ...eventsWithoutDate] : eventsWithDate;
+          const v = events.length;
           const mx = person.cat==="A"?crit.A:crit.B;
-          let ic="⚪", cl="#475569", st="Sin evaluar";
-          if(v!==undefined){
-            if(v===0){ic="🟢";cl="#10b981";st="Cero eventos — Excelente"}
-            else if(v<=mx){ic="🟡";cl="#f59e0b";st=`${v} evento(s) — Dentro del límite`}
+          let ic="🟢", cl="#10b981", st="Cero eventos — Excelente";
+          if(v>0){
+            if(v<=mx){ic="🟡";cl="#f59e0b";st=`${v} evento(s) — Dentro del límite`}
             else{ic="🔴";cl="#ef4444";st=`${v} evento(s) — Excede límite (máx ${mx})`}
           }
           return <div key={crit.id} style={{marginBottom:10,padding:"12px 14px",background:"rgba(15,23,42,.5)",borderRadius:10,border:`1px solid ${cl}20`}}>
@@ -971,14 +998,27 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
   const prevMes = mes === 0 ? 11 : mes - 1;
   const prevAnio = mes === 0 ? anio - 1 : anio;
 
+  // Resumen de metros/instalaciones SOLO del periodo seleccionado (regla 26→25)
+  // Antes se usaba el total historico (bI/bA) y mostraba lo mismo en todos los meses.
+  const periodSum = useMemo(()=>{
+    const fr = filterByPeriod(recs, mes, anio).filter(r=>!r.disabled);
+    const mi={}, ma={};
+    fr.forEach(r=>{
+      if(r.i && r.i!=="—"){ if(!mi[r.i])mi[r.i]={mt:0,n:0}; mi[r.i].mt+=r.ml||0; mi[r.i].n+=1; }
+      if(r.a && r.a!=="—"){ if(!ma[r.a])ma[r.a]={mt:0,n:0}; ma[r.a].mt+=r.ml||0; ma[r.a].n+=1; }
+      if(r.a2 && r.a2!=="—"){ if(!ma[r.a2])ma[r.a2]={mt:0,n:0}; ma[r.a2].mt+=r.ml||0; ma[r.a2].n+=1; }
+    });
+    return {mi, ma};
+  },[recs,mes,anio]);
+
   // Score del periodo seleccionado + mes anterior + promedio 3 meses
   const scInst = inst.filter(t=>t.on).map(t=>({
     ...t,
     score: getScoreByPeriod(scores,t.id,inst,mes,anio),
     prevScore: getScoreByPeriod(scores,t.id,inst,prevMes,prevAnio),
     avg3: getScoreAverage(scores,t.id,inst,mes,anio,3),
-    mt: bI[t.name]?.mt||0,
-    n: bI[t.name]?.n||0
+    mt: periodSum.mi[t.name]?.mt||0,
+    n: periodSum.mi[t.name]?.n||0
   })).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
 
   const scAyud = ayud.filter(t=>t.on).map(t=>({
@@ -986,8 +1026,8 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
     score: getScoreByPeriod(scoresA,t.id,ayud,mes,anio),
     prevScore: getScoreByPeriod(scoresA,t.id,ayud,prevMes,prevAnio),
     avg3: getScoreAverage(scoresA,t.id,ayud,mes,anio,3),
-    mt: bA[t.name]?.mt||0,
-    n: bA[t.name]?.n||0
+    mt: periodSum.ma[t.name]?.mt||0,
+    n: periodSum.ma[t.name]?.n||0
   })).sort((a,b)=>(b.score!==null?b.score:-1)-(a.score!==null?a.score:-1));
 
   const years = useMemo(()=>{const s=new Set([anio]);recs.forEach(r=>{if(r.dt)s.add(parseInt(r.dt.substring(0,4)))});return[...s].sort()},[recs,anio]);
@@ -1037,17 +1077,17 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
     {(teamScoreNow!==null || teamPrevScore!==null || teamAvg3!==null) && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12,marginBottom:18}}>
       {teamScoreNow!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
         <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio del Mes</div>
-        <div style={{fontSize:26,fontWeight:900,color:teamScoreNow>=85?"#34d399":teamScoreNow>=60?"#fbbf24":"#f87171"}}>{teamScoreNow}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
+        <div style={{fontSize:26,fontWeight:900,color:teamScoreNow>=90?"#34d399":teamScoreNow>=70?"#fbbf24":"#f87171"}}>{teamScoreNow}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
         <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Instaladores · {MESES[mes]}</div>
       </div>}
       {teamPrevScore!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
         <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Mes Anterior</div>
-        <div style={{fontSize:26,fontWeight:900,color:teamPrevScore>=85?"#34d399":teamPrevScore>=60?"#fbbf24":"#f87171"}}>{teamPrevScore}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
+        <div style={{fontSize:26,fontWeight:900,color:teamPrevScore>=90?"#34d399":teamPrevScore>=70?"#fbbf24":"#f87171"}}>{teamPrevScore}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
         <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>{MESES[prevMes]} {prevAnio}</div>
       </div>}
       {teamAvg3!==null && <div style={{padding:"14px 18px",background:"rgba(17,24,39,.6)",border:"1px solid rgba(30,41,59,.5)",borderRadius:12}}>
         <div style={{fontSize:9,fontWeight:700,color:"#64748b",textTransform:"uppercase",letterSpacing:2,marginBottom:6}}>Promedio 3 Meses</div>
-        <div style={{fontSize:26,fontWeight:900,color:teamAvg3>=85?"#34d399":teamAvg3>=60?"#fbbf24":"#f87171"}}>{teamAvg3}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
+        <div style={{fontSize:26,fontWeight:900,color:teamAvg3>=90?"#34d399":teamAvg3>=70?"#fbbf24":"#f87171"}}>{teamAvg3}<span style={{fontSize:14,color:"#64748b"}}>/100</span></div>
         <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>Últimos 3 periodos</div>
       </div>}
     </div>}
@@ -1056,7 +1096,7 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
       <div className="card-h"><span style={{color:"#60a5fa"}}>◈</span> Scorecard Instaladores — {MESES[mes]} {anio}</div>
       <div style={{padding:18}}>
         {scInst.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-          {scInst.map(t=><ScoreCard key={t.id} person={t} score={t.score} prevScore={t.prevScore} avg3={t.avg3} n={t.n} mt={t.mt} onClick={()=>onPersonClick("inst",t)}/>)}
+          {scInst.map(t=><ScoreCard key={t.id} person={t} score={t.score} prevScore={t.prevScore} avg3={t.avg3} n={t.n} mt={t.mt} onClick={()=>onPersonClick("inst",t,mes,anio)}/>)}
         </div>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:13}}>Sin instaladores activos</div>}
       </div>
     </div>
@@ -1065,7 +1105,7 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
       <div className="card-h"><span style={{color:"#a78bfa"}}>◇</span> Scorecard Ayudantes — {MESES[mes]} {anio}</div>
       <div style={{padding:18}}>
         {scAyud.length?<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
-          {scAyud.map(t=><ScoreCard key={t.id} person={t} score={t.score} prevScore={t.prevScore} avg3={t.avg3} n={t.n} mt={t.mt} onClick={()=>onPersonClick("ayud",t)}/>)}
+          {scAyud.map(t=><ScoreCard key={t.id} person={t} score={t.score} prevScore={t.prevScore} avg3={t.avg3} n={t.n} mt={t.mt} onClick={()=>onPersonClick("ayud",t,mes,anio)}/>)}
         </div>:<div style={{padding:30,textAlign:"center",color:"#334155",fontSize:13}}>Sin ayudantes activos</div>}
       </div>
     </div>
@@ -1485,7 +1525,7 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
   const tm = list.find(t=>t.id===sel);
   // Score del periodo seleccionado (no histórico)
   const ov = sel ? getScoreByPeriod(sd, sel, list, mes, anio) : null;
-  const oc = ov===null?"#475569":ov>=85?"#10b981":ov>=60?"#f59e0b":"#ef4444";
+  const oc = scoreColor(ov);
 
   // Estado para form de evento nuevo
   const [evtCrit,setEvtCrit] = useState(null);
@@ -1594,7 +1634,7 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
     <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:18}}>
       {list.map(t=>{
         const o=getScoreByPeriod(sd,t.id,list,mes,anio);
-        const c=o===null?"#475569":o>=85?"#10b981":o>=60?"#f59e0b":"#ef4444";
+        const c=scoreColor(o);
         return <button key={t.id} onClick={()=>setSel(t.id)} style={{padding:"8px 14px",borderRadius:10,border:sel===t.id?`2px solid ${c}`:"1px solid rgba(51,65,85,.3)",background:sel===t.id?`${c}10`:"transparent",color:sel===t.id?"#f1f5f9":"#94a3b8",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"inherit"}}>
           <span style={{fontWeight:700}}>{t.name.split(" ")[0]}</span>
           {o!==null?<span style={{background:`${c}18`,color:c,padding:"2px 7px",borderRadius:99,fontSize:10,fontWeight:800}}>{o}</span>:<span style={{background:"rgba(100,116,139,.15)",color:"#64748b",padding:"2px 7px",borderRadius:99,fontSize:10,fontWeight:800}}>—</span>}
@@ -2022,14 +2062,14 @@ function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA,recs,svR,RATE}){
     <div style={{display:"grid",gap:8}}>
       {sub==="inst" ? inst.map(t=>{
         const ay = ayud.find(a=>a.id===t.defaultAyId);
-        const score = getScore(scores,t.id,inst);
+        const score = getScoreByPeriod(scores,t.id,inst,getCurrentPeriod().mes,getCurrentPeriod().anio);
         return <div key={t.id} className="card" style={{display:"flex",alignItems:"center",gap:14,padding:"14px 18px",flexWrap:"wrap",opacity:t.on?1:.45}}>
           <div style={{width:44,height:44,borderRadius:10,background:"rgba(96,165,250,.12)",color:"#60a5fa",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,flexShrink:0}}>{t.name[0]}</div>
           <div style={{flex:1,minWidth:180}}>
             <div style={{fontSize:14,fontWeight:800,color:"#f1f5f9"}}>{t.name}</div>
             <div style={{fontSize:11,color:"#64748b",marginTop:2}}>Ayudante asignado: <b style={{color:ay?"#a78bfa":"#475569"}}>{ay?ay.name:"— Sin asignar —"}</b></div>
           </div>
-          {score!==null && <div style={{padding:"4px 10px",borderRadius:8,background:`${score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444"}15`,color:score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444",fontSize:11,fontWeight:800}}>Score {score}</div>}
+          {score!==null && <div style={{padding:"4px 10px",borderRadius:8,background:`${scoreColor(score)}15`,color:scoreColor(score),fontSize:11,fontWeight:800}}>Score {score}</div>}
           <Cat c={t.cat} lg/>
           {canEdit && <>
             <button className="btn bg" style={{padding:"7px 12px",fontSize:11}} onClick={()=>setAssignFor(t)} title="Cambiar ayudante asignado">⇄ Asignar Ayudante</button>
@@ -2039,14 +2079,14 @@ function AdminV({inst,svI,ayud,svA,canEdit,scores,scoresA,recs,svR,RATE}){
           </>}
         </div>;
       }) : ayud.map(t=>{
-        const score = getScore(scoresA,t.id,ayud);
+        const score = getScoreByPeriod(scoresA,t.id,ayud,getCurrentPeriod().mes,getCurrentPeriod().anio);
         return <div key={t.id} className="card" style={{display:"flex",alignItems:"center",gap:14,padding:"14px 18px",flexWrap:"wrap",opacity:t.on?1:.45}}>
           <div style={{width:44,height:44,borderRadius:10,background:"rgba(167,139,250,.12)",color:"#a78bfa",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:900,flexShrink:0}}>{t.name[0]}</div>
           <div style={{flex:1,minWidth:180}}>
             <div style={{fontSize:14,fontWeight:800,color:"#f1f5f9"}}>{t.name}</div>
             <div style={{fontSize:11,color:"#64748b",marginTop:2}}>Ayudante</div>
           </div>
-          {score!==null && <div style={{padding:"4px 10px",borderRadius:8,background:`${score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444"}15`,color:score>=85?"#10b981":score>=60?"#f59e0b":"#ef4444",fontSize:11,fontWeight:800}}>Score {score}</div>}
+          {score!==null && <div style={{padding:"4px 10px",borderRadius:8,background:`${scoreColor(score)}15`,color:scoreColor(score),fontSize:11,fontWeight:800}}>Score {score}</div>}
           <Cat c={t.cat} lg/>
           {canEdit && <>
             <button className="btn bs" style={{padding:"7px 12px",fontSize:11}} onClick={()=>setPromoteAy(t)} title="Ascender a instalador">↑ Ascender a Instalador</button>
