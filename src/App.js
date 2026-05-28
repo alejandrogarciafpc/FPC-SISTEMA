@@ -209,23 +209,45 @@ function getScore(sd, tid, list){
 }
 
 // Score filtrado por periodo (mes-año específico)
-// Misma lógica que getScore() (solo promedia criterios documentados) pero filtrando por fecha 25-25.
-// Si NO hay eventos en el periodo → 100 (mes limpio = perfecto). NUNCA devuelve null.
+// Cuenta solo los eventos cuya fecha cae dentro del periodo 25-25
 function getScoreByPeriod(sd, tid, list, mesIdx, anio){
-  const t = list.find(x=>x.id===tid); if(!t) return 100;
+  const t = list.find(x=>x.id===tid); if(!t) return null;
   // Calcular rango del periodo
   const startMonth = mesIdx === 0 ? 11 : mesIdx - 1;
   const startYear  = mesIdx === 0 ? anio - 1 : anio;
   const start = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
   const end   = `${anio}-${String(mesIdx+1).padStart(2,"0")}-25`;
 
+  const personData = sd[tid];
+  if(!personData) return null;
+
   // Determinar si este es el periodo actual
   const cur = getCurrentPeriod();
   const isCurrentPeriod = (mesIdx === cur.mes && anio === cur.anio);
 
-  // Para cada criterio, contar SOLO eventos del periodo. Si el criterio tiene >0 eventos
-  // en el periodo, se incluye en el promedio. Si tiene 0 eventos, se ignora (igual que getScore).
-  // Eventos sin fecha (formato viejo) se asumen del periodo actual.
+  // Contar eventos del periodo
+  // REGLA: si un evento NO tiene fecha, se asume que es del periodo ACTUAL
+  // (porque es la primera vez que se usa el sistema)
+  let hayDatosEnPeriodo = false;
+  CRIT.forEach(c=>{
+    const events = getCritEvents(sd,tid,c.id);
+    const eventsEnPeriodo = events.filter(ev => {
+      if(!ev.date) return isCurrentPeriod; // sin fecha = mes actual
+      return ev.date >= start && ev.date <= end;
+    });
+    // También considerar el campo value directo (formato viejo)
+    const directValue = getCritValue(sd,tid,c.id);
+    if(eventsEnPeriodo.length > 0) hayDatosEnPeriodo = true;
+    if(isCurrentPeriod && directValue !== undefined && directValue !== 0 && events.length === 0) {
+      // Formato viejo (sin events[]) en periodo actual
+      hayDatosEnPeriodo = true;
+    }
+  });
+
+  // Si no hay eventos documentados en este periodo, devolver null
+  if(!hayDatosEnPeriodo) return null;
+
+  // Calcular el score
   let tot=0, cnt=0;
   CRIT.forEach(c=>{
     const events = getCritEvents(sd,tid,c.id);
@@ -233,37 +255,32 @@ function getScoreByPeriod(sd, tid, list, mesIdx, anio){
       if(!ev.date) return isCurrentPeriod;
       return ev.date >= start && ev.date <= end;
     }).length;
-    // Formato viejo: campo value sin events[]. Solo cuenta en periodo actual.
+    // Si no hay events[] pero hay value directo (formato viejo), usarlo en periodo actual
     if(events.length === 0 && isCurrentPeriod) {
       const directValue = getCritValue(sd,tid,c.id);
-      if(directValue !== undefined && directValue > 0) v = directValue;
+      if(directValue !== undefined) v = directValue;
     }
-    // Solo incluir el criterio si tuvo eventos en este periodo (misma lógica que getScore)
-    if(v === 0) return;
     const mx = t.cat==="A"?c.A:c.B;
-    if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
+    if(v === 0) { tot += 100; }
+    else if(v <= mx) { tot += Math.max(0, 100 - (v * 25)); }
     else { tot += Math.max(0, 100 - (mx * 25) - ((v - mx) * 25)); }
     cnt++;
   });
-  // Sin eventos en el periodo = mes limpio = 100 (verde perfecto)
-  if(cnt === 0) return 100;
-  return Math.round(tot/cnt);
+  return cnt ? Math.round(tot/cnt) : null;
 }
 
 // Promedio de scores de los últimos N meses (incluye el periodo actual)
-// Como getScoreByPeriod ya no devuelve null (devuelve 100 cuando no hay eventos),
-// el promedio incluye todos los meses solicitados.
 function getScoreAverage(sd, tid, list, mesIdx, anio, numMonths){
   const scores = [];
   let m = mesIdx, y = anio;
   for(let i=0; i<numMonths; i++){
     const s = getScoreByPeriod(sd, tid, list, m, y);
-    if(s !== null && s !== undefined) scores.push(s);
+    if(s !== null) scores.push(s);
     // Retroceder un mes
     m = m - 1;
     if(m < 0){ m = 11; y--; }
   }
-  if(!scores.length) return 100;
+  if(!scores.length) return null;
   return Math.round(scores.reduce((a,b)=>a+b,0) / scores.length);
 }
 
@@ -1424,26 +1441,52 @@ function RPV({bP,cm}){
 // ═══════════════════════════════════════════════════════════
 function SCV({inst,ayud,scores,svS,scoresA,svSA,bI,bA,canEdit,recs,svR}){
   const [sub,setSub]=useState("inst");
+  const cur = getCurrentPeriod();
+  const [mes,setMes] = useState(cur.mes);
+  const [anio,setAnio] = useState(cur.anio);
+
   const list = sub==="inst"?inst:ayud;
   const sd = sub==="inst"?scores:scoresA;
   const sv = sub==="inst"?svS:svSA;
   const summary = sub==="inst"?bI:bA;
 
+  const years = useMemo(()=>{const s=new Set([anio,cur.anio]);recs.forEach(r=>{if(r.dt)s.add(parseInt(r.dt.substring(0,4)))});return[...s].sort()},[recs,anio,cur.anio]);
+
+  function prevMonth(){if(mes===0){setMes(11);setAnio(anio-1)}else setMes(mes-1)}
+  function nextMonth(){if(mes===11){setMes(0);setAnio(anio+1)}else setMes(mes+1)}
+
+  const isCurrentMonth = mes===cur.mes && anio===cur.anio;
+
   return <div>
     <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:"0 0 6px"}}>Scorecard de Cumplimiento</h1>
     <p style={{fontSize:13,color:"#475569",margin:"0 0 14px"}}>Documenta cada error o evento con cotización, fecha, cliente y descripción</p>
+
+    {/* SELECTOR DE PERIODO */}
+    <div className="card" style={{marginBottom:14,padding:14,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+      <button className="btn bg" onClick={prevMonth}>◀</button>
+      <select className="sel" value={mes} onChange={e=>setMes(parseInt(e.target.value))} style={{width:140}}>{MESES.map((m,i)=><option key={i} value={i}>{m}</option>)}</select>
+      <select className="sel" value={anio} onChange={e=>setAnio(parseInt(e.target.value))} style={{width:100}}>{years.map(y=><option key={y} value={y}>{y}</option>)}</select>
+      <button className="btn bg" onClick={nextMonth}>▶</button>
+      <div style={{flex:1,textAlign:"right",fontSize:12,color:"#64748b"}}>
+        Periodo: <b style={{color:"#cbd5e1"}}>{getPeriodRange(mes,anio).labelCorto}</b>
+        {isCurrentMonth && <span style={{marginLeft:8,padding:"2px 8px",background:"rgba(16,185,129,.1)",color:"#34d399",borderRadius:99,fontSize:10,fontWeight:700}}>● PERIODO ACTUAL</span>}
+        {!isCurrentMonth && <span style={{marginLeft:8,padding:"2px 8px",background:"rgba(100,116,139,.1)",color:"#94a3b8",borderRadius:99,fontSize:10,fontWeight:700}}>◷ HISTÓRICO</span>}
+      </div>
+    </div>
+
     <div style={{display:"flex",gap:8,marginBottom:18}}>
       <button className={`pill ${sub==="inst"?"on":""}`} onClick={()=>setSub("inst")}>◈ Instaladores</button>
       <button className={`pill ${sub==="ayud"?"on":""}`} onClick={()=>setSub("ayud")}>◇ Ayudantes</button>
     </div>
-    <SCEditor list={list.filter(t=>t.on)} sd={sd} svSd={sv} summary={summary} canEdit={canEdit} kind={sub} recs={recs} svR={svR} allInst={inst} allAyud={ayud} scoresA={scoresA} svSA={svSA} scores={scores} svS={svS}/>
+    <SCEditor list={list.filter(t=>t.on)} sd={sd} svSd={sv} summary={summary} canEdit={canEdit} kind={sub} recs={recs} svR={svR} allInst={inst} allAyud={ayud} scoresA={scoresA} svSA={svSA} scores={scores} svS={svS} mes={mes} anio={anio} isCurrentMonth={isCurrentMonth}/>
   </div>;
 }
 
-function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,scoresA,svSA,scores,svS}){
+function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,scoresA,svSA,scores,svS,mes,anio,isCurrentMonth}){
   const [sel,setSel] = useState("");
   const tm = list.find(t=>t.id===sel);
-  const ov = sel ? getScore(sd, sel, list) : null;
+  // Score del periodo seleccionado (no histórico)
+  const ov = sel ? getScoreByPeriod(sd, sel, list, mes, anio) : null;
   const oc = ov===null?"#475569":ov>=85?"#10b981":ov>=60?"#f59e0b":"#ef4444";
 
   // Estado para form de evento nuevo
@@ -1552,11 +1595,11 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
   return <div>
     <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:18}}>
       {list.map(t=>{
-        const o=getScore(sd,t.id,list);
+        const o=getScoreByPeriod(sd,t.id,list,mes,anio);
         const c=o===null?"#475569":o>=85?"#10b981":o>=60?"#f59e0b":"#ef4444";
         return <button key={t.id} onClick={()=>setSel(t.id)} style={{padding:"8px 14px",borderRadius:10,border:sel===t.id?`2px solid ${c}`:"1px solid rgba(51,65,85,.3)",background:sel===t.id?`${c}10`:"transparent",color:sel===t.id?"#f1f5f9":"#94a3b8",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",gap:6,fontFamily:"inherit"}}>
           <span style={{fontWeight:700}}>{t.name.split(" ")[0]}</span>
-          {o!==null&&<span style={{background:`${c}18`,color:c,padding:"2px 7px",borderRadius:99,fontSize:10,fontWeight:800}}>{o}</span>}
+          {o!==null?<span style={{background:`${c}18`,color:c,padding:"2px 7px",borderRadius:99,fontSize:10,fontWeight:800}}>{o}</span>:<span style={{background:"rgba(100,116,139,.15)",color:"#64748b",padding:"2px 7px",borderRadius:99,fontSize:10,fontWeight:800}}>—</span>}
         </button>;
       })}
     </div>
@@ -1580,16 +1623,34 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
       </div></div>
 
       <div className="card">
-        <div className="card-h"><span style={{color:oc}}>◎</span> Criterios — Categoría {tm.cat} ({tm.cat==="A"?"Cero tolerancia":"Tolerancia limitada"})</div>
+        <div className="card-h"><span style={{color:oc}}>◎</span> Criterios — {MESES[mes]} {anio} — Categoría {tm.cat} ({tm.cat==="A"?"Cero tolerancia":"Tolerancia limitada"})</div>
         <div>
         {CRIT.map(c=>{
-          const v = getCritValue(sd, sel, c.id);
-          const events = getCritEvents(sd, sel, c.id);
+          // Filtrar eventos del periodo seleccionado
+          const allEvents = getCritEvents(sd, sel, c.id);
+          const directValue = getCritValue(sd, sel, c.id);
+          const startMonth = mes === 0 ? 11 : mes - 1;
+          const startYear = mes === 0 ? anio - 1 : anio;
+          const periodStart = `${startYear}-${String(startMonth+1).padStart(2,"0")}-26`;
+          const periodEnd = `${anio}-${String(mes+1).padStart(2,"0")}-25`;
+
+          const events = allEvents.filter(ev=>{
+            if(!ev.date) return isCurrentMonth; // sin fecha = mes actual
+            return ev.date >= periodStart && ev.date <= periodEnd;
+          });
+          // Si no hay events[] pero hay value directo, mostrarlo en periodo actual
+          let v = events.length;
+          if(allEvents.length === 0 && isCurrentMonth && directValue !== undefined) {
+            v = directValue;
+          }
+
           const mx = tm.cat==="A"?c.A:c.B;
           let ic="⚪",cl="#475569";
-          if(v!==undefined){
+          if(v > 0 || (allEvents.length === 0 && isCurrentMonth && directValue !== undefined)){
             if(c.cnt){ic=v===0?"🟢":v<=mx?"🟡":"🔴"; cl=v===0?"#10b981":v<=mx?"#f59e0b":"#ef4444"}
             else{ic=v>=mx?"🟢":v>=mx*.8?"🟡":"🔴"; cl=v>=mx?"#10b981":v>=mx*.8?"#f59e0b":"#ef4444"}
+          } else if(v === 0) {
+            ic="🟢"; cl="#10b981";
           }
           return <div key={c.id} style={{padding:"14px 18px",borderBottom:"1px solid rgba(30,48,72,.3)"}}>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -1600,8 +1661,8 @@ function SCEditor({list,sd,svSd,summary,canEdit,kind,recs,svR,allInst,allAyud,sc
               </div>
               <div style={{display:"flex",gap:6,alignItems:"center"}}>
                 <span style={{fontSize:11,color:"#64748b"}}>Eventos:</span>
-                <span style={{minWidth:40,textAlign:"center",fontSize:18,fontWeight:900,color:cl}}>{events.length||(v||0)}</span>
-                {canEdit&&<button className="btn bp" style={{padding:"6px 12px",fontSize:11}} onClick={()=>{setEvtCrit(c);setEvtDate(today())}}>+ Documentar</button>}
+                <span style={{minWidth:40,textAlign:"center",fontSize:18,fontWeight:900,color:cl}}>{v}</span>
+                {canEdit&&isCurrentMonth&&<button className="btn bp" style={{padding:"6px 12px",fontSize:11}} onClick={()=>{setEvtCrit(c);setEvtDate(today())}}>+ Documentar</button>}
               </div>
             </div>
 
