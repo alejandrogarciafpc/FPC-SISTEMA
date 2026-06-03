@@ -140,34 +140,148 @@ const USERS = {
   "ayudantesp":{pw:"sp123",       name:"Ayudante Servi Persianas",role:"viewer", canMoney:false, canEdit:false, publicOnly:true, dept:"sp"},
 };
 
-// ───── STORAGE — Firebase Firestore ─────
-import { initializeApp } from "firebase/app";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+// ───── STORAGE — Supabase (Postgres) ─────
+import { createClient } from "@supabase/supabase-js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyBOSKF8Eo8JXM8wkqprWV2viXatMSHI5Qg",
-  authDomain: "fpc-sistema.firebaseapp.com",
-  projectId: "fpc-sistema",
-  storageBucket: "fpc-sistema.firebasestorage.app",
-  messagingSenderId: "499421752797",
-  appId: "1:499421752797:web:e306b639c349830d985a34",
-  measurementId: "G-KE5JMC8VRT"
-};
+const SUPABASE_URL = "https://mqichhdxjbkpknuoirng.supabase.co";
+const SUPABASE_KEY = "sb_publishable_OjRV7Gdh6bd6vTDUz9jR7A_rPVV5KMV";
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const fbApp = initializeApp(firebaseConfig);
-const fbDb = getFirestore(fbApp);
+// El sistema usa keys tipo "fpc11-r", "sp11-s", etc. (heredado de Firebase).
+// Este DB traduce esas keys a las tablas de Supabase y devuelve/guarda
+// EXACTAMENTE la misma forma de datos que antes (listas / objetos),
+// para que NINGUNA otra parte del codigo tenga que cambiar.
+function parseKey(k){
+  // k = "fpc11-r" | "sp11-s" | "fpc11-inst" ...
+  const dash = k.indexOf("-");
+  const prefix = k.slice(0, dash);          // fpc11 | sp11
+  const suf = k.slice(dash + 1);            // r | s | sa | inst | ayud
+  const dept = prefix === "sp11" ? "sp" : "fpc";
+  return { dept, suf };
+}
 
 const DB = {
   async get(k){
     try {
-      const snap = await getDoc(doc(fbDb, "fpc_data", k));
-      return snap.exists() ? snap.data().value : null;
-    } catch(e){ console.error("DB get error:",e); return null; }
+      const { dept, suf } = parseKey(k);
+
+      // --- REGISTROS (suf "r") -> tabla registros, devolver como lista ---
+      if(suf === "r"){
+        const { data, error } = await sb.from("registros").select("*").eq("dept", dept);
+        if(error) throw error;
+        return (data||[]).map(row => ({
+          id: row.id, dt: row.dt, co: row.co, cl: row.cl,
+          i: row.i, a: row.a, a2: row.a2,
+          cI: row.ci, cA: row.ca, cA2: row.ca2,
+          p: row.p, m: row.m, u: row.u, ml: row.ml,
+          pi: row.pi, pa: row.pa, pa2: row.pa2,
+          by: row.by_user, disabled: row.disabled, disabledReason: row.disabled_reason
+        }));
+      }
+
+      // --- INSTALADORES (suf "inst") / AYUDANTES (suf "ayud") -> tabla personas ---
+      if(suf === "inst" || suf === "ayud"){
+        const tipo = suf === "inst" ? "inst" : "ayud";
+        const { data, error } = await sb.from("personas").select("*").eq("dept", dept).eq("tipo", tipo);
+        if(error) throw error;
+        return (data||[]).map(row => {
+          const o = { id: row.pid, name: row.name, cat: row.cat, on: row.on_active };
+          if(tipo === "inst") o.defaultAyId = row.default_ay_id || "";
+          return o;
+        });
+      }
+
+      // --- SCORECARDS instaladores (suf "s") / ayudantes (suf "sa") ---
+      // Devuelve objeto { personId: { critId: { value, events:[...] } } }
+      if(suf === "s" || suf === "sa"){
+        const tipo = suf === "s" ? "inst" : "ayud";
+        const { data, error } = await sb.from("scorecard_eventos").select("*").eq("dept", dept).eq("tipo", tipo);
+        if(error) throw error;
+        const out = {};
+        (data||[]).forEach(ev => {
+          if(!out[ev.person_id]) out[ev.person_id] = {};
+          if(!out[ev.person_id][ev.crit]) out[ev.person_id][ev.crit] = { value: 0, events: [] };
+          out[ev.person_id][ev.crit].events.push({
+            date: ev.date, coti: ev.coti, cliente: ev.cliente, descripcion: ev.descripcion
+          });
+          out[ev.person_id][ev.crit].value = out[ev.person_id][ev.crit].events.length;
+        });
+        return out;
+      }
+
+      return null;
+    } catch(e){ console.error("DB get error:", e); return null; }
   },
-  async set(k,v){
+
+  async set(k, v){
     try {
-      await setDoc(doc(fbDb, "fpc_data", k), { value: v, updated: new Date().toISOString() });
-    } catch(e){ console.error("DB set error:",e); }
+      const { dept, suf } = parseKey(k);
+
+      // --- REGISTROS: reemplazar todos los del depto por la lista nueva ---
+      if(suf === "r"){
+        // PROTECCION: si llega lista vacia, NO borrar lo que ya existe (evita wipe accidental)
+        if(!v || !v.length){ console.warn("DB.set registros: lista vacia, omitido para no borrar"); return; }
+        const rows = (v||[]).map(r => ({
+          id: r.id, dept,
+          dt: r.dt || null, co: r.co || null, cl: r.cl || null,
+          i: r.i || null, a: r.a || null, a2: r.a2 || null,
+          ci: r.cI || null, ca: r.cA || null, ca2: r.cA2 || null,
+          p: r.p || null, m: r.m ?? null, u: r.u ?? null, ml: r.ml ?? null,
+          pi: r.pi ?? null, pa: r.pa ?? null, pa2: r.pa2 ?? null,
+          by_user: r.by || null, disabled: !!r.disabled, disabled_reason: r.disabledReason || null
+        }));
+        await sb.from("registros").delete().eq("dept", dept);
+        if(rows.length){
+          for(let i=0;i<rows.length;i+=500){
+            const { error } = await sb.from("registros").upsert(rows.slice(i,i+500));
+            if(error) throw error;
+          }
+        }
+        return;
+      }
+
+      // --- PERSONAS (inst / ayud) ---
+      if(suf === "inst" || suf === "ayud"){
+        if(!v || !v.length){ console.warn("DB.set personas: lista vacia, omitido para no borrar"); return; }
+        const tipo = suf === "inst" ? "inst" : "ayud";
+        const rows = (v||[]).map(p => ({
+          uid: dept + "-" + p.id, dept, tipo, pid: p.id,
+          name: p.name, cat: p.cat || "B", on_active: p.on !== false,
+          default_ay_id: tipo === "inst" ? (p.defaultAyId || null) : null
+        }));
+        await sb.from("personas").delete().eq("dept", dept).eq("tipo", tipo);
+        if(rows.length){
+          const { error } = await sb.from("personas").upsert(rows);
+          if(error) throw error;
+        }
+        return;
+      }
+
+      // --- SCORECARDS (s / sa): reescribir eventos del depto+tipo ---
+      if(suf === "s" || suf === "sa"){
+        const tipo = suf === "s" ? "inst" : "ayud";
+        const rows = [];
+        Object.keys(v||{}).forEach(personId => {
+          const crits = v[personId] || {};
+          Object.keys(crits).forEach(crit => {
+            const evs = (crits[crit] && crits[crit].events) || [];
+            evs.forEach(ev => rows.push({
+              dept, tipo, person_id: personId, crit,
+              date: ev.date || null, coti: ev.coti || null,
+              cliente: ev.cliente || null, descripcion: ev.descripcion || null
+            }));
+          });
+        });
+        await sb.from("scorecard_eventos").delete().eq("dept", dept).eq("tipo", tipo);
+        if(rows.length){
+          for(let i=0;i<rows.length;i+=500){
+            const { error } = await sb.from("scorecard_eventos").insert(rows.slice(i,i+500));
+            if(error) throw error;
+          }
+        }
+        return;
+      }
+    } catch(e){ console.error("DB set error:", e); }
   },
 };
 
