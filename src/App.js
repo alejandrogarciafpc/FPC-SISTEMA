@@ -1255,9 +1255,14 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
   const [buscar,setBuscar]=useState("");
 
   const filteredRecs = useMemo(()=>{
-    if(!buscar.trim()) return recs;
-    const q = buscar.trim().toLowerCase();
-    return recs.filter(r=> (r.co&&r.co.toLowerCase().includes(q)) || (r.cl&&r.cl.toLowerCase().includes(q)) || (r.i&&r.i.toLowerCase().includes(q)) || (r.a&&r.a.toLowerCase().includes(q)));
+    let base;
+    if(!buscar.trim()) base = recs;
+    else {
+      const q = buscar.trim().toLowerCase();
+      base = recs.filter(r=> (r.co&&r.co.toLowerCase().includes(q)) || (r.cl&&r.cl.toLowerCase().includes(q)) || (r.i&&r.i.toLowerCase().includes(q)) || (r.a&&r.a.toLowerCase().includes(q)));
+    }
+    // Mostrar los mas recientes primero (por fecha desc; dentro del mismo dia, lo ultimo ingresado arriba)
+    return base.slice().reverse().sort((a,b)=> (b.dt||"").localeCompare(a.dt||""));
   },[recs,buscar]);
 
   const tI = aI.find(x=>x.name===selI);
@@ -1388,7 +1393,7 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
       <div style={{overflowX:"auto",maxHeight:480}}>
         <table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr>
           {["Fecha","Cot","Cliente","Instalador","Ayudante 1","Ayudante 2","Producto","Mts",""].map(h=><th key={h} className="th" style={h==="Mts"?{textAlign:"right"}:{}}>{h}</th>)}
-        </tr></thead><tbody>{filteredRecs.slice(0,50).map(r=>{
+        </tr></thead><tbody>{filteredRecs.map(r=>{
           const dis = r.disabled;
           const rowStyle = dis ? {opacity:.45,textDecoration:"line-through"} : {};
           return <tr key={r.id} style={rowStyle}>
