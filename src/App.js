@@ -167,9 +167,24 @@ const DB = {
 
       // --- REGISTROS (suf "r") -> tabla registros, devolver como lista ---
       if(suf === "r"){
-        const { data, error } = await sb.from("registros").select("*").eq("dept", dept);
-        if(error) throw error;
-        return (data||[]).map(row => ({
+        // Supabase devuelve maximo 1000 filas por consulta.
+        // Traemos TODOS en bloques de 1000 hasta que no venga mas.
+        const all = [];
+        const PAGE = 1000;
+        let from = 0;
+        while(true){
+          const { data, error } = await sb
+            .from("registros").select("*").eq("dept", dept)
+            .order("created_at", { ascending: true })
+            .range(from, from + PAGE - 1);
+          if(error) throw error;
+          const batch = data || [];
+          all.push(...batch);
+          if(batch.length < PAGE) break;   // ultimo bloque
+          from += PAGE;
+          if(from > 100000) break;          // tope de seguridad
+        }
+        return all.map(row => ({
           id: row.id, dt: row.dt, co: row.co, cl: row.cl,
           i: row.i, a: row.a, a2: row.a2,
           cI: row.ci, cA: row.ca, cA2: row.ca2,
