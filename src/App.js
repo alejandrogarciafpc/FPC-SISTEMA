@@ -1422,13 +1422,64 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
 // ═══════════════════════════════════════════════════════════
 function ResumenV({inst,ayud,bI,bA,recs,cm}){
   const [sub,setSub]=useState("inst");
+  const cur = getCurrentPeriod();
+  const [mes,setMes] = useState(cur.mes);
+  const [anio,setAnio] = useState(cur.anio);
+  const years = useMemo(()=>{const s=new Set([anio]);recs.forEach(r=>{if(r.dt)s.add(parseInt(r.dt.substring(0,4)))});return[...s].sort()},[recs,anio]);
+  function prevMonth(){if(mes===0){setMes(11);setAnio(anio-1)}else setMes(mes-1)}
+  function nextMonth(){if(mes===11){setMes(0);setAnio(anio+1)}else setMes(mes+1)}
+
+  // Registros del periodo elegido (regla 26->25), solo habilitados
+  const fRecs = useMemo(()=>filterByPeriod(recs,mes,anio).filter(r=>!r.disabled),[recs,mes,anio]);
+
+  // Recalcular totales por instalador SOLO del mes elegido
+  const bIf = useMemo(()=>{
+    const m={};
+    fRecs.forEach(r=>{
+      if(!r.i||r.i==="—") return;
+      if(!m[r.i]) m[r.i]={mt:0,pi:0,pa:0,n:0,pr:{}};
+      m[r.i].mt+=r.ml||0; m[r.i].pi+=r.pi||0; m[r.i].pa+=r.pa||0; m[r.i].n+=1;
+      if(!m[r.i].pr[r.p]) m[r.i].pr[r.p]={mt:0,pi:0,pa:0,n:0};
+      m[r.i].pr[r.p].mt+=r.ml||0; m[r.i].pr[r.p].pi+=r.pi||0; m[r.i].pr[r.p].pa+=r.pa||0; m[r.i].pr[r.p].n+=1;
+    });
+    return m;
+  },[fRecs]);
+
+  // Recalcular totales por ayudante SOLO del mes elegido
+  const bAf = useMemo(()=>{
+    const m={};
+    fRecs.forEach(r=>{
+      if(r.a && r.a!=="—"){
+        if(!m[r.a]) m[r.a]={mt:0,pa:0,n:0,pr:{}};
+        m[r.a].mt+=r.ml||0; m[r.a].pa+=r.pa||0; m[r.a].n+=1;
+        if(!m[r.a].pr[r.p]) m[r.a].pr[r.p]={mt:0,pa:0,n:0};
+        m[r.a].pr[r.p].mt+=r.ml||0; m[r.a].pr[r.p].pa+=r.pa||0; m[r.a].pr[r.p].n+=1;
+      }
+      if(r.a2 && r.a2!=="—"){
+        if(!m[r.a2]) m[r.a2]={mt:0,pa:0,n:0,pr:{}};
+        m[r.a2].mt+=r.ml||0; m[r.a2].pa+=r.pa2||0; m[r.a2].n+=1;
+        if(!m[r.a2].pr[r.p]) m[r.a2].pr[r.p]={mt:0,pa:0,n:0};
+        m[r.a2].pr[r.p].mt+=r.ml||0; m[r.a2].pr[r.p].pa+=r.pa2||0; m[r.a2].pr[r.p].n+=1;
+      }
+    });
+    return m;
+  },[fRecs]);
+
   return <div>
-    <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:"0 0 14px"}}>Resumen por Personal</h1>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:12}}>
+      <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:0}}>Resumen por Personal — {MESES[mes]} {anio}</h1>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        <button className="btn bg" onClick={prevMonth} style={{padding:"6px 12px",fontSize:16}}>◀</button>
+        <select className="sel" value={mes} onChange={e=>setMes(parseInt(e.target.value))} style={{width:140}}>{MESES.map((m,i)=><option key={i} value={i}>{m}</option>)}</select>
+        <select className="sel" value={anio} onChange={e=>setAnio(parseInt(e.target.value))} style={{width:90}}>{years.map(y=><option key={y} value={y}>{y}</option>)}</select>
+        <button className="btn bg" onClick={nextMonth} style={{padding:"6px 12px",fontSize:16}}>▶</button>
+      </div>
+    </div>
     <div style={{display:"flex",gap:8,marginBottom:18}}>
       <button className={`pill ${sub==="inst"?"on":""}`} onClick={()=>setSub("inst")}>◈ Instaladores</button>
       <button className={`pill ${sub==="ayud"?"on":""}`} onClick={()=>setSub("ayud")}>◇ Ayudantes</button>
     </div>
-    {sub==="inst" ? <RIV list={inst} bI={bI} recs={recs} cm={cm}/> : <RAyV list={ayud} bA={bA} recs={recs} cm={cm}/>}
+    {sub==="inst" ? <RIV list={inst} bI={bIf} recs={fRecs} cm={cm}/> : <RAyV list={ayud} bA={bAf} recs={fRecs} cm={cm}/>}
   </div>;
 }
 
