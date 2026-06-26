@@ -133,7 +133,7 @@ const CRIT = [
 const USERS = {
   "admin":     {pw:"fpc2026",     name:"Administrador",        role:"admin",     canMoney:true,  canEdit:true,  publicOnly:false},
   "gerente":   {pw:"gerente2026", name:"Gerente Operaciones",  role:"gerente",   canMoney:true,  canEdit:true,  publicOnly:false},
-  "diana":     {pw:"diana2026",   name:"Diana — Asistente",    role:"asistente", canMoney:false, canEdit:true,  publicOnly:false},
+  "diana":     {pw:"diana2026",   name:"Diana — Asistente",    role:"asistente", canMoney:true,  canEdit:true,  publicOnly:false},
   "instalador":{pw:"fpc123",      name:"Instalador FPC",       role:"viewer",    canMoney:false, canEdit:false, publicOnly:true, dept:"fpc"},
   "ayudante":  {pw:"fpc123",      name:"Ayudante FPC",         role:"viewer",    canMoney:false, canEdit:false, publicOnly:true, dept:"fpc"},
   "tecnico":   {pw:"sp123",       name:"Técnico Servi Persianas", role:"viewer", canMoney:false, canEdit:false, publicOnly:true, dept:"sp"},
