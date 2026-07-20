@@ -147,6 +147,10 @@ const SUPABASE_URL = "https://mqichhdxjbkpknuoirng.supabase.co";
 const SUPABASE_KEY = "sb_publishable_OjRV7Gdh6bd6vTDUz9jR7A_rPVV5KMV";
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// Version del sistema. Subir este numero en cada deploy ayuda a saber
+// que version esta corriendo cada computadora (ver esquina inferior).
+const APP_VERSION = "2026-07-20 · v2 (guardado seguro)";
+
 // El sistema usa keys tipo "fpc11-r", "sp11-s", etc. (heredado de Firebase).
 // Este DB traduce esas keys a las tablas de Supabase y devuelve/guarda
 // EXACTAMENTE la misma forma de datos que antes (listas / objetos),
@@ -232,9 +236,13 @@ const DB = {
     try {
       const { dept, suf } = parseKey(k);
 
-      // --- REGISTROS: reemplazar todos los del depto por la lista nueva ---
+      // --- REGISTROS: actualizar/insertar por id. NUNCA borra el depto. ---
+      // IMPORTANTE (leccion del 20-jul-2026): antes esto hacia DELETE de todo
+      // el depto y luego reinsertaba. Si el reinsert fallaba tras el delete,
+      // se perdian TODOS los datos. Ahora SOLO hace upsert (insert o update por id):
+      // aunque la lista venga incompleta, jamas borra lo que ya esta en la base.
+      // Las eliminaciones reales se hacen con DB.deleteReg / DB.clearRegsDept.
       if(suf === "r"){
-        // PROTECCION: si llega lista vacia, NO borrar lo que ya existe (evita wipe accidental)
         if(!v || !v.length){ console.warn("DB.set registros: lista vacia, omitido para no borrar"); return; }
         const rows = (v||[]).map(r => ({
           id: r.id, dept,
@@ -245,12 +253,9 @@ const DB = {
           pi: r.pi ?? null, pa: r.pa ?? null, pa2: r.pa2 ?? null,
           by_user: r.by || null, disabled: !!r.disabled, disabled_reason: r.disabledReason || null
         }));
-        await sb.from("registros").delete().eq("dept", dept);
-        if(rows.length){
-          for(let i=0;i<rows.length;i+=500){
-            const { error } = await sb.from("registros").upsert(rows.slice(i,i+500));
-            if(error) throw error;
-          }
+        for(let i=0;i<rows.length;i+=500){
+          const { error } = await sb.from("registros").upsert(rows.slice(i,i+500));
+          if(error) throw error;
         }
         return;
       }
@@ -296,7 +301,49 @@ const DB = {
         }
         return;
       }
-    } catch(e){ console.error("DB set error:", e); }
+    } catch(e){ console.error("DB set error:", e); throw e; } // <-- re-lanza para que la pantalla pueda avisar
+  },
+
+  // ───── OPERACIONES GRANULARES DE REGISTROS (seguras, una fila a la vez) ─────
+  // Convierten la forma interna (cI, cA, by, disabledReason) a columnas de la tabla.
+  _rowFromRec(dept, r){
+    return {
+      id: r.id, dept,
+      dt: r.dt || null, co: r.co || null, cl: r.cl || null,
+      i: r.i || null, a: r.a || null, a2: r.a2 || null,
+      ci: r.cI || null, ca: r.cA || null, ca2: r.cA2 || null,
+      p: r.p || null, m: r.m ?? null, u: r.u ?? null, ml: r.ml ?? null,
+      pi: r.pi ?? null, pa: r.pa ?? null, pa2: r.pa2 ?? null,
+      by_user: r.by || null, disabled: !!r.disabled, disabled_reason: r.disabledReason || null
+    };
+  },
+  // Inserta UN registro y CONFIRMA leyendolo de vuelta. Si no queda en la base, lanza error.
+  async addReg(dept, r){
+    const row = this._rowFromRec(dept, r);
+    const { error } = await sb.from("registros").insert(row);
+    if(error) throw error;
+    const { data, error: e2 } = await sb.from("registros").select("id").eq("id", r.id).maybeSingle();
+    if(e2) throw e2;
+    if(!data) throw new Error("El registro no quedo confirmado en la base");
+    return true;
+  },
+  // Actualiza UN registro por id (patch = columnas de la tabla, ej {disabled:true}).
+  async updateReg(dept, id, patch){
+    const { error } = await sb.from("registros").update(patch).eq("id", id);
+    if(error) throw error;
+    return true;
+  },
+  // Elimina UN registro por id.
+  async deleteReg(dept, id){
+    const { error } = await sb.from("registros").delete().eq("id", id);
+    if(error) throw error;
+    return true;
+  },
+  // Borra TODOS los registros del depto (solo para el boton "Limpiar todo").
+  async clearRegsDept(dept){
+    const { error } = await sb.from("registros").delete().eq("dept", dept);
+    if(error) throw error;
+    return true;
   },
 };
 
@@ -569,6 +616,10 @@ export default function App(){
   const [loginErr,setLoginErr] = useState("");
   const [mob,setMob] = useState(false);
   const [detailPerson,setDetailPerson] = useState(null);
+  // Estado de sincronizacion con la base (para avisar si algo NO se guardo)
+  const [syncErr,setSyncErr] = useState("");     // mensaje de error de guardado (vacio = todo bien)
+  const [lastSync,setLastSync] = useState(null);  // fecha/hora del ultimo guardado exitoso
+  const [saving,setSaving] = useState(false);     // true mientras esta guardando
 
   const RATE = getRate(dept);
   const PRODS = getProds(dept);
@@ -591,23 +642,68 @@ export default function App(){
     const otherAyudNames = dept==="sp"?FPC_AYUD_NAMES:SP_AYUD_NAMES;
 
     let i = await DB.get(pfx+"-inst"), a = await DB.get(pfx+"-ayud"), r = await DB.get(pfx+"-r"), s = await DB.get(pfx+"-s"), sa = await DB.get(pfx+"-sa");
-    if(!i||!i.length){i=defInst; await DB.set(pfx+"-inst",i)}
-    if(!a||!a.length){a=defAyud; await DB.set(pfx+"-ayud",a)}
+    try{
+      if(!i||!i.length){i=defInst; await DB.set(pfx+"-inst",i)}
+      if(!a||!a.length){a=defAyud; await DB.set(pfx+"-ayud",a)}
+    }catch(e){ console.error("No se pudieron guardar los valores por defecto:", e); if(!i)i=defInst; if(!a)a=defAyud; }
 
     // Limpiar: remover personas del otro departamento que se hayan mezclado
     const iClean = i.filter(x=>!otherInstNames.includes(x.name));
     const aClean = a.filter(x=>!otherAyudNames.includes(x.name)).map(x=>x.cat?x:{...x,cat:"B"});
-    if(iClean.length!==i.length) await DB.set(pfx+"-inst",iClean);
-    if(aClean.length!==a.length) await DB.set(pfx+"-ayud",aClean);
+    try{
+      if(iClean.length!==i.length) await DB.set(pfx+"-inst",iClean);
+      if(aClean.length!==a.length) await DB.set(pfx+"-ayud",aClean);
+    }catch(e){ console.error("No se pudo guardar limpieza de personas:", e); }
 
     setInst(iClean); setAyud(aClean); setRecs(r||[]); setScores(s||{}); setScoresA(sa||{}); setOk(true);
   })()},[dept,pfx]);
 
-  const svI = useCallback(async v=>{setInst(v); await DB.set(pfx+"-inst",v)},[pfx]);
-  const svA = useCallback(async v=>{setAyud(v); await DB.set(pfx+"-ayud",v)},[pfx]);
-  const svR = useCallback(async v=>{setRecs(v); await DB.set(pfx+"-r",v)},[pfx]);
-  const svS = useCallback(async v=>{setScores(v); await DB.set(pfx+"-s",v)},[pfx]);
-  const svSA = useCallback(async v=>{setScoresA(v); await DB.set(pfx+"-sa",v)},[pfx]);
+  // persist(): ejecuta un guardado y REPORTA si funciono. Si falla, prende la
+  // alerta roja y devuelve false (para que quien llama sepa que NO se guardo).
+  const persist = useCallback(async (fn)=>{
+    setSaving(true);
+    try{
+      await fn();
+      setLastSync(new Date());
+      setSyncErr("");
+      return true;
+    }catch(e){
+      console.error("Guardado fallo:", e);
+      setSyncErr("NO se pudo guardar en la base. Revisa tu conexion a internet y NO cierres esta pagina. Volve a intentar.");
+      return false;
+    }finally{
+      setSaving(false);
+    }
+  },[]);
+
+  const svI = useCallback(async v=>{setInst(v); return persist(()=>DB.set(pfx+"-inst",v))},[pfx,persist]);
+  const svA = useCallback(async v=>{setAyud(v); return persist(()=>DB.set(pfx+"-ayud",v))},[pfx,persist]);
+  const svR = useCallback(async v=>{setRecs(v); return persist(()=>DB.set(pfx+"-r",v))},[pfx,persist]);
+  const svS = useCallback(async v=>{setScores(v); return persist(()=>DB.set(pfx+"-s",v))},[pfx,persist]);
+  const svSA = useCallback(async v=>{setScoresA(v); return persist(()=>DB.set(pfx+"-sa",v))},[pfx,persist]);
+
+  // ── Operaciones GRANULARES de registros: guardan en la base PRIMERO y solo
+  //    despues actualizan la pantalla. Asi nunca se ve "guardado" algo que no lo esta.
+  const addRec = useCallback(async rec=>{
+    const okSave = await persist(()=>DB.addReg(dept, rec));
+    if(okSave) setRecs(prev=>[rec, ...prev]);   // solo aparece si QUEDO en la base
+    return okSave;
+  },[dept,persist]);
+  const updRec = useCallback(async (id, patch, localPatch)=>{
+    const okSave = await persist(()=>DB.updateReg(dept, id, patch));
+    if(okSave) setRecs(prev=>prev.map(x=>x.id===id?{...x,...(localPatch||patch)}:x));
+    return okSave;
+  },[dept,persist]);
+  const delRec = useCallback(async id=>{
+    const okSave = await persist(()=>DB.deleteReg(dept, id));
+    if(okSave) setRecs(prev=>prev.filter(x=>x.id!==id));
+    return okSave;
+  },[dept,persist]);
+  const clearRecs = useCallback(async ()=>{
+    const okSave = await persist(()=>DB.clearRegsDept(dept));
+    if(okSave) setRecs([]);
+    return okSave;
+  },[dept,persist]);
 
   // Resumen por instalador (por nombre, ya que el record guarda nombre)
   // Solo registros habilitados para cálculos de pago
@@ -833,6 +929,10 @@ export default function App(){
         <div style={{fontSize:11,color:"#34d399",fontWeight:600,marginBottom:4}}>● {user.name}</div>
         <button onClick={()=>{setUser(null);setLoginUser("");setLoginPw("");setLoginErr("")}} style={{width:"100%",padding:"6px 10px",borderRadius:8,border:"1px solid rgba(51,65,85,.4)",background:"transparent",color:"#64748b",fontSize:11,cursor:"pointer"}}>Cerrar sesión</button>
         <div style={{fontSize:9,color:"#334155",marginTop:8}}>{deptInfo.icon} {deptInfo.name} · {recs.length} reg · {inst.length} inst · {ayud.length} ayud</div>
+        <div style={{fontSize:9,color:"#334155",marginTop:4,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+          <span title="Version del sistema en esta computadora">v: {APP_VERSION}</span>
+          <button onClick={()=>window.location.reload(true)} title="Recargar para traer la ultima version" style={{background:"none",border:"1px solid rgba(51,65,85,.4)",color:"#64748b",fontSize:9,padding:"2px 6px",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>🔄 Actualizar</button>
+        </div>
       </div>
     </div>
 
@@ -874,13 +974,26 @@ export default function App(){
         <div style={{flex:1}}/>
         {!publicOnly&&<span style={{fontSize:11,color:deptInfo.color,background:`${deptInfo.color}15`,padding:"4px 12px",borderRadius:99,border:`1px solid ${deptInfo.color}30`,fontWeight:700}}>{deptInfo.icon} {deptInfo.name}</span>}
         <span style={{fontSize:11,color:"#34d399",background:"rgba(5,150,105,.1)",padding:"4px 12px",borderRadius:99,border:"1px solid rgba(5,150,105,.2)",fontWeight:600}}>● {user.name}</span>
+        {/* Indicador de sincronizacion con la base */}
+        {saving
+          ? <span style={{fontSize:11,color:"#fbbf24",background:"rgba(245,158,11,.1)",padding:"4px 12px",borderRadius:99,border:"1px solid rgba(245,158,11,.25)",fontWeight:600}}>⏳ Guardando...</span>
+          : syncErr
+            ? <span style={{fontSize:11,color:"#fca5a5",background:"rgba(239,68,68,.12)",padding:"4px 12px",borderRadius:99,border:"1px solid rgba(239,68,68,.3)",fontWeight:700}}>⚠ Sin guardar</span>
+            : <span style={{fontSize:11,color:"#34d399",background:"rgba(5,150,105,.1)",padding:"4px 12px",borderRadius:99,border:"1px solid rgba(5,150,105,.2)",fontWeight:600}} title={lastSync?("Ultima sincronizacion: "+lastSync.toLocaleTimeString("es-GT")):""}>✔ {lastSync?("Guardado "+lastSync.toLocaleTimeString("es-GT",{hour:"2-digit",minute:"2-digit"})):"En linea"}</span>}
         <span style={{fontSize:11,color:"#334155"}}>{new Date().toLocaleDateString("es-GT",{day:"numeric",month:"long",year:"numeric"})}</span>
       </div>
+
+      {/* ALERTA ROJA GRANDE: si algo NO se guardo en la base */}
+      {syncErr && <div style={{background:"#7f1d1d",borderBottom:"2px solid #ef4444",color:"#fee2e2",padding:"12px 24px",display:"flex",alignItems:"center",gap:12,position:"sticky",top:0,zIndex:60,fontSize:14,fontWeight:600}}>
+        <span style={{fontSize:20}}>⚠️</span>
+        <span style={{flex:1}}>{syncErr}</span>
+        <button onClick={()=>setSyncErr("")} style={{background:"rgba(255,255,255,.15)",border:"none",color:"#fff",padding:"6px 14px",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>Entendido</button>
+      </div>}
 
       <div style={{padding:"24px 28px",maxWidth:1440,margin:"0 auto"}} className="fu">
         {tab==="dash" && !publicOnly && <DashExecV inst={inst} ayud={ayud} recs={recs} scores={scores} scoresA={scoresA} cm={canMoney}/>}
         {tab==="dsc"  && <DashScoreV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} scores={scores} scoresA={scoresA} publicOnly={publicOnly} onPersonClick={(kind,person,mes,anio)=>setDetailPerson({kind,person,mes,anio})}/>}
-        {tab==="ing"  && !publicOnly && <IngV inst={inst} ayud={ayud} svI={svI} svA={svA} recs={recs} svR={svR} canEdit={canEdit} user={user} RATE={RATE} PRODS={PRODS}/>}
+        {tab==="ing"  && !publicOnly && <IngV inst={inst} ayud={ayud} svI={svI} svA={svA} recs={recs} addRec={addRec} updRec={updRec} delRec={delRec} clearRecs={clearRecs} canEdit={canEdit} user={user} RATE={RATE} PRODS={PRODS}/>}
         {tab==="ri"   && !publicOnly && <ResumenV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} cm={canMoney}/>}
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
         {tab==="sc"   && !publicOnly && <SCV inst={inst} ayud={ayud} scores={scores} svS={svS} scoresA={scoresA} svSA={svSA} bI={bI} bA={bA} canEdit={canEdit} recs={recs} svR={svR}/>}
@@ -1244,7 +1357,7 @@ function DashScoreV({inst,ayud,bI,bA,recs,scores,scoresA,publicOnly,onPersonClic
 // ═══════════════════════════════════════════════════════════
 // INGRESO DE METROS — instalador y ayudante 100% independientes
 // ═══════════════════════════════════════════════════════════
-function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
+function IngV({inst,ayud,svI,svA,recs,addRec,updRec,delRec,clearRecs,canEdit,user,RATE,PRODS}){
   const aI = inst.filter(t=>t.on);
   const aA = ayud.filter(t=>t.on);
   const [selI,setSelI]=useState(""); const [selA,setSelA]=useState(""); const [selA2,setSelA2]=useState("");
@@ -1274,18 +1387,29 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
   const payA = prod&&tA ? +(ml*(RATE[prod]?.[tA.cat]?.a||0)).toFixed(2) : 0;
   const payA2 = prod&&tA2 ? +(ml*(RATE[prod]?.[tA2.cat]?.a||0)).toFixed(2) : 0;
 
-  function add(keepCoti){
+  const [guardando,setGuardando]=useState(false);
+  async function add(keepCoti){
     if(!canEdit){setMsg("❌ Sin permisos");return}
     if((!selI&&!selA)||!prod||!mn){setMsg("❌ Seleccione al menos instalador o ayudante, producto y metros");return}
-    svR([{id:Date.now().toString(36),dt:today(),co:cot.trim(),cl:cli.trim(),
+    if(guardando) return; // evitar doble clic
+    const rec = {id:Date.now().toString(36),dt:today(),co:cot.trim(),cl:cli.trim(),
       i:selI||"—",a:selA||"—",a2:selA2||"—",cI:tI?.cat||"—",cA:tA?.cat||"B",cA2:tA2?.cat||"B",
       p:prod,m:mn,u:un,ml,pi:payI,pa:payA,pa2:payA2,
-      by:user?.name||"Sistema"},...recs]);
-    setMsg(`✅ Registrado: ${selI||selA} · ${prod} · ${N(ml)} mts`);
-    // Si keepCoti, solo limpiar producto y metros (para agregar otro producto a la misma coti)
-    setProd("");setMts("");setUnis("1");
-    if(!keepCoti){setCot("");setCli("")}
-    setTimeout(()=>setMsg(""),4000);
+      by:user?.name||"Sistema"};
+    setGuardando(true);
+    setMsg("⏳ Guardando en la base...");
+    const okSave = await addRec(rec);   // guarda en Supabase y CONFIRMA
+    setGuardando(false);
+    if(okSave){
+      setMsg(`✅ Guardado y confirmado en la base: ${selI||selA} · ${prod} · ${N(ml)} mts`);
+      // Solo limpiamos el formulario cuando de verdad quedo guardado
+      setProd("");setMts("");setUnis("1");
+      if(!keepCoti){setCot("");setCli("")}
+      setTimeout(()=>setMsg(""),4000);
+    }else{
+      // NO limpiamos nada: el dato sigue en el formulario para reintentar
+      setMsg("⚠️ NO se guardo en la base. Revisa tu internet y apreta Registrar otra vez. NO se perdio nada.");
+    }
   }
 
   function doAddPerson(which){
@@ -1374,8 +1498,8 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
         </div>}
 
         <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-          <button className="btn bs" onClick={()=>add(false)}>✓ Registrar</button>
-          <button className="btn bp" onClick={()=>add(true)} title="Registrar y agregar otro producto a la misma cotización">✓ Registrar + Agregar otro producto</button>
+          <button className="btn bs" disabled={guardando} style={guardando?{opacity:.5,cursor:"wait"}:{}} onClick={()=>add(false)}>{guardando?"⏳ Guardando...":"✓ Registrar"}</button>
+          <button className="btn bp" disabled={guardando} style={guardando?{opacity:.5,cursor:"wait"}:{}} onClick={()=>add(true)} title="Registrar y agregar otro producto a la misma cotización">✓ Registrar + Agregar otro producto</button>
           {msg&&<span style={{fontSize:12,color:msg[0]==="✅"?"#10b981":"#ef4444",fontWeight:600}}>{msg}</span>}
           {!canEdit&&!user&&<span style={{fontSize:11,color:"#f59e0b"}}>⚠ Inicie sesión para registrar</span>}
         </div>
@@ -1387,7 +1511,7 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
         <span><span style={{color:"#64748b"}}>▤</span> Registros ({recs.length})</span>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           <input className="inp" value={buscar} onChange={e=>setBuscar(e.target.value)} placeholder="🔍 Buscar cotización o cliente..." style={{width:260,fontSize:12,padding:"7px 12px"}}/>
-          {recs.length>0&&canEdit&&<button className="btn bg" style={{fontSize:11,padding:"5px 12px"}} onClick={()=>{if(window.confirm("¿Eliminar TODOS los registros?"))svR([])}}>Limpiar todo</button>}
+          {recs.length>0&&canEdit&&<button className="btn bg" style={{fontSize:11,padding:"5px 12px"}} onClick={()=>{if(window.confirm("¿Eliminar TODOS los registros de este departamento? Esto NO se puede deshacer."))clearRecs()}}>Limpiar todo</button>}
         </div>
       </div>
       <div style={{overflowX:"auto",maxHeight:480}}>
@@ -1406,8 +1530,8 @@ function IngV({inst,ayud,svI,svA,recs,svR,canEdit,user,RATE,PRODS}){
           <td className="td" style={{color:"#60a5fa",fontWeight:600}}>{r.p}</td>
           <td className="td" style={{textAlign:"right",fontWeight:800,fontSize:13}}>{N(r.ml)}</td>
           <td className="td" style={{whiteSpace:"nowrap"}}>{canEdit&&<>
-            <button style={{background:"none",border:"none",color:dis?"#10b981":"#f59e0b",cursor:"pointer",fontSize:14,marginRight:4}} onClick={()=>svR(recs.map(x=>x.id===r.id?{...x,disabled:!x.disabled}:x))} title={dis?"Habilitar para pago":"Inhabilitar — no suma a pago"}>{dis?"✅":"🚫"}</button>
-            <button style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14}} onClick={()=>svR(recs.filter(x=>x.id!==r.id))} title="Eliminar">✕</button>
+            <button style={{background:"none",border:"none",color:dis?"#10b981":"#f59e0b",cursor:"pointer",fontSize:14,marginRight:4}} onClick={()=>updRec(r.id,{disabled:!dis},{disabled:!dis})} title={dis?"Habilitar para pago":"Inhabilitar — no suma a pago"}>{dis?"✅":"🚫"}</button>
+            <button style={{background:"none",border:"none",color:"#ef4444",cursor:"pointer",fontSize:14}} onClick={()=>{if(window.confirm("¿Eliminar este registro?"))delRec(r.id)}} title="Eliminar">✕</button>
           </>}</td>
         </tr>})}</tbody></table>
         {!filteredRecs.length&&<div style={{padding:40,textAlign:"center",color:"#334155",fontSize:13}}>{buscar?"No se encontraron resultados para '"+buscar+"'":"Sin registros"}</div>}
