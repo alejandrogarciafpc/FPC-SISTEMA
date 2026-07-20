@@ -149,7 +149,7 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // Version del sistema. Subir este numero en cada deploy ayuda a saber
 // que version esta corriendo cada computadora (ver esquina inferior).
-const APP_VERSION = "2026-07-20 · v2 (guardado seguro)";
+const APP_VERSION = "2026-07-20 · v3 (guardado seguro + bandeja)";
 
 // El sistema usa keys tipo "fpc11-r", "sp11-s", etc. (heredado de Firebase).
 // Este DB traduce esas keys a las tablas de Supabase y devuelve/guarda
@@ -342,6 +342,52 @@ const DB = {
   // Borra TODOS los registros del depto (solo para el boton "Limpiar todo").
   async clearRegsDept(dept){
     const { error } = await sb.from("registros").delete().eq("dept", dept);
+    if(error) throw error;
+    return true;
+  },
+
+  // ───── BANDEJA DE REPORTES (asesores/gerentes reportan eventos) ─────
+  // Inserta un reporte nuevo (desde el formulario publico) y confirma.
+  async addReporte(rep){
+    const row = {
+      dept: rep.dept || null,
+      reporta_nombre: rep.reportaNombre || null,
+      reporta_empresa: rep.reportaEmpresa || null,
+      inst: rep.inst || null,
+      ayud: rep.ayud || null,
+      tipo: rep.tipo || null,
+      coti: rep.coti || null,
+      cliente: rep.cliente || null,
+      fecha: rep.fecha || null,
+      descripcion: rep.descripcion || null,
+      estado: "pendiente"
+    };
+    const { data, error } = await sb.from("reportes").insert(row).select("id").maybeSingle();
+    if(error) throw error;
+    if(!data) throw new Error("El reporte no quedo confirmado en la base");
+    return true;
+  },
+  // Trae todos los reportes (mas nuevos primero) para la bandeja de Diana.
+  async getReportes(){
+    const { data, error } = await sb.from("reportes").select("*").order("created_at", { ascending: false });
+    if(error) throw error;
+    return data || [];
+  },
+  // Cuenta los pendientes (para el numerito de la pestana).
+  async countReportesPendientes(){
+    const { count, error } = await sb.from("reportes").select("id", { count: "exact", head: true }).eq("estado", "pendiente");
+    if(error) throw error;
+    return count || 0;
+  },
+  // Cambia el estado de un reporte: pendiente | leido | archivado.
+  async setReporteEstado(id, estado){
+    const { error } = await sb.from("reportes").update({ estado }).eq("id", id);
+    if(error) throw error;
+    return true;
+  },
+  // Elimina un reporte de la bandeja.
+  async deleteReporte(id){
+    const { error } = await sb.from("reportes").delete().eq("id", id);
     if(error) throw error;
     return true;
   },
@@ -620,6 +666,7 @@ export default function App(){
   const [syncErr,setSyncErr] = useState("");     // mensaje de error de guardado (vacio = todo bien)
   const [lastSync,setLastSync] = useState(null);  // fecha/hora del ultimo guardado exitoso
   const [saving,setSaving] = useState(false);     // true mientras esta guardando
+  const [pendReportes,setPendReportes] = useState(0); // reportes pendientes en la bandeja
 
   const RATE = getRate(dept);
   const PRODS = getProds(dept);
@@ -780,6 +827,7 @@ export default function App(){
     {id:"adm", ic:"⚙",l:"Administración Personal",edit:true},
     {id:"tb",  ic:"▦",l:"Tablas de Pago"},
     {id:"pg",  ic:"$",l:"Pagos & Incentivos",money:true},
+    {id:"band",ic:"📥",l:"Bandeja Reportes",edit:true},
   ];
   const visTabs = TABS.filter(t=>{
     if(publicOnly) return t.publicAlso;
@@ -789,6 +837,18 @@ export default function App(){
   });
 
   useEffect(()=>{ if(publicOnly && tab!=="dsc") setTab("dsc") },[publicOnly,tab]);
+  // Contar reportes pendientes de la bandeja (para el numerito en la pestana)
+  useEffect(()=>{ if(canEdit){ DB.countReportesPendientes().then(setPendReportes).catch(()=>{}); } },[canEdit,tab]);
+
+  // ─── MODO REPORTE PUBLICO ───
+  // Si el link trae "reportar" (ej: .../?reportar), mostramos SOLO el formulario
+  // publico para que asesores/gerentes reporten eventos. No pide login.
+  const reportMode = typeof window!=="undefined" && (
+    (window.location.search||"").toLowerCase().includes("reportar") ||
+    (window.location.pathname||"").toLowerCase().includes("reportar") ||
+    (window.location.hash||"").toLowerCase().includes("reportar")
+  );
+  if(reportMode) return <ReportarPublic/>;
 
   // ─── PANTALLA DE CARGA ───
   if(!ok) return <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#020617 0%,#0a1628 40%,#0f172a 100%)",fontFamily:"'Inter',system-ui,sans-serif"}}>
@@ -911,6 +971,7 @@ export default function App(){
             <button onClick={()=>{setTab(t.id); if(!hasDepts) setTab(t.id)}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"9px 10px",borderRadius:8,border:"none",background:isActive?"rgba(37,99,235,.1)":"transparent",color:isActive?"#60a5fa":"#64748b",fontSize:12,fontWeight:isActive?700:500,cursor:"pointer",textAlign:"left",fontFamily:"inherit",transition:"all .15s"}}>
               <span style={{width:18,textAlign:"center",fontSize:12,opacity:.7}}>{t.ic}</span>
               <span style={{flex:1}}>{t.l}</span>
+              {t.id==="band" && pendReportes>0 && <span style={{fontSize:9,fontWeight:800,background:"#dc2626",color:"#fff",padding:"1px 6px",borderRadius:99,minWidth:16,textAlign:"center"}}>{pendReportes}</span>}
               {t.money&&<span style={{fontSize:8,background:"rgba(245,158,11,.15)",color:"#fbbf24",padding:"1px 5px",borderRadius:99}}>🔒</span>}
               {hasDepts && isActive && <span style={{fontSize:9,color:"#475569"}}>▾</span>}
             </button>
@@ -997,6 +1058,7 @@ export default function App(){
         {tab==="ri"   && !publicOnly && <ResumenV inst={inst} ayud={ayud} bI={bI} bA={bA} recs={recs} cm={canMoney}/>}
         {tab==="rp"   && !publicOnly && <RPV bP={bP} cm={canMoney}/>}
         {tab==="sc"   && !publicOnly && <SCV inst={inst} ayud={ayud} scores={scores} svS={svS} scoresA={scoresA} svSA={svSA} bI={bI} bA={bA} canEdit={canEdit} recs={recs} svR={svR}/>}
+        {tab==="band" && !publicOnly && canEdit && <BandejaV canEdit={canEdit}/>}
         {tab==="adm"  && !publicOnly && <AdminV inst={inst} svI={svI} ayud={ayud} svA={svA} canEdit={canEdit} scores={scores} scoresA={scoresA} recs={recs} svR={svR} RATE={RATE}/>}
         {tab==="rep"  && canMoney && <ReportV inst={inst} ayud={ayud} recs={recs}/>}
         {tab==="tb"   && !publicOnly && <TBV RATE={RATE} PRODS={PRODS} deptInfo={deptInfo}/>}
@@ -2771,6 +2833,277 @@ function PGV({inst,ayud,bI,bA}){
         </tbody></table>
         {!sA.length&&<div style={{padding:40,textAlign:"center",color:"#334155"}}>Sin datos</div>}
       </div>
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  REPORTES: tipos de evento (en palabras faciles para el que reporta)
+// ═══════════════════════════════════════════════════════════
+// Marcas / tiendas de donde vienen los que reportan (asesores/gerentes).
+// Editá esta lista cuando quieras agregar o quitar marcas.
+const MARCAS_REPORTE = [
+  "Persiluz",
+  "Patrona",
+  "Servi Persianas",
+  "La Bodega de la Persiana",
+  "La Cortina Express",
+  "Ready Rollers",
+  "La Cortinería"
+];
+
+const TIPOS_REPORTE = [
+  "No llamó al cliente",
+  "No llevó el material completo",
+  "Reprogramó sin avisar",
+  "Llegó tarde / no llegó",
+  "Error de medición",
+  "Retrabajo (hubo que volver a hacerlo)",
+  "Garantía",
+  "Reclamo del cliente",
+  "Mal servicio / mala actitud",
+  "Problema de disciplina / orden",
+  "Otro (explico abajo)"
+];
+
+// ═══════════════════════════════════════════════════════════
+//  FORMULARIO PUBLICO DE REPORTES  (link: .../?reportar)
+//  Lo usan asesores/gerentes. No pide login. Cae a la bandeja de Diana.
+// ═══════════════════════════════════════════════════════════
+function ReportarPublic(){
+  const [dept,setDept] = useState("fpc");
+  const [personas,setPersonas] = useState({fpc:{inst:[],ayud:[]}, sp:{inst:[],ayud:[]}});
+  const [reportaNombre,setReportaNombre] = useState("");
+  const [reportaEmpresa,setReportaEmpresa] = useState(""); // marca/tienda seleccionada
+  const [marcaOtra,setMarcaOtra] = useState("");           // texto si eligen "Otra"
+  const [inst,setInst] = useState("");
+  const [instOtro,setInstOtro] = useState("");
+  const [ayud,setAyud] = useState("");
+  const [ayudOtro,setAyudOtro] = useState("");
+  const [tipo,setTipo] = useState("");
+  const [coti,setCoti] = useState("");
+  const [cliente,setCliente] = useState("");
+  const [fecha,setFecha] = useState(today());
+  const [desc,setDesc] = useState("");
+  const [enviando,setEnviando] = useState(false);
+  const [enviado,setEnviado] = useState(false);
+  const [err,setErr] = useState("");
+
+  useEffect(()=>{(async()=>{
+    try{
+      const [fi,fa,si,sa] = await Promise.all([
+        DB.get("fpc11-inst"), DB.get("fpc11-ayud"), DB.get("sp11-inst"), DB.get("sp11-ayud")
+      ]);
+      const on = arr => (arr||[]).filter(x=>x.on!==false).map(x=>x.name).sort();
+      setPersonas({ fpc:{inst:on(fi),ayud:on(fa)}, sp:{inst:on(si),ayud:on(sa)} });
+    }catch(e){ console.error("No se pudieron cargar las personas:", e); }
+  })()},[]);
+
+  const listaInst = personas[dept]?.inst || [];
+  const listaAyud = personas[dept]?.ayud || [];
+  const instFinal = inst==="__otro__" ? instOtro.trim() : inst;
+  const ayudFinal = ayud==="__otro__" ? ayudOtro.trim() : ayud;
+  const marcaFinal = reportaEmpresa==="__otro__" ? marcaOtra.trim() : reportaEmpresa;
+
+  async function enviar(){
+    setErr("");
+    if(!reportaNombre.trim()){ setErr("Escribí tu nombre (quién reporta)."); return; }
+    if(!marcaFinal){ setErr("Elegí la marca / tienda a la que pertenecés."); return; }
+    if(!instFinal && !ayudFinal){ setErr("Indicá al menos un instalador o ayudante."); return; }
+    if(!tipo){ setErr("Elegí el tipo de evento."); return; }
+    if(!desc.trim()){ setErr("Escribí una descripción de lo que pasó."); return; }
+    setEnviando(true);
+    try{
+      await DB.addReporte({
+        dept, reportaNombre:reportaNombre.trim(), reportaEmpresa:marcaFinal,
+        inst:instFinal||"", ayud:ayudFinal||"", tipo, coti:coti.trim(), cliente:cliente.trim(),
+        fecha, descripcion:desc.trim()
+      });
+      setEnviado(true);
+    }catch(e){
+      console.error(e);
+      setErr("No se pudo enviar. Revisá tu internet e intentá de nuevo.");
+    }finally{ setEnviando(false); }
+  }
+
+  const wrap = {fontFamily:"'Inter',-apple-system,sans-serif",minHeight:"100vh",background:"linear-gradient(135deg,#020617 0%,#0a1628 40%,#0f172a 100%)",padding:"24px 16px",color:"#e2e8f0"};
+  const card = {maxWidth:560,margin:"0 auto",background:"rgba(15,23,42,.85)",border:"1px solid rgba(51,65,85,.5)",borderRadius:16,padding:24};
+  const lab = {fontSize:11,fontWeight:700,color:"#94a3b8",display:"block",marginBottom:5,textTransform:"uppercase",marginTop:14};
+  const inp = {width:"100%",padding:"12px 14px",borderRadius:10,border:"1px solid rgba(51,65,85,.6)",background:"rgba(2,6,23,.6)",color:"#e2e8f0",fontSize:14,outline:"none",fontFamily:"inherit",boxSizing:"border-box"};
+
+  if(enviado) return <div style={wrap}><div style={card}>
+    <div style={{textAlign:"center",padding:"20px 0"}}>
+      <div style={{fontSize:48,marginBottom:10}}>✅</div>
+      <h2 style={{color:"#f1f5f9",margin:"0 0 8px"}}>¡Reporte enviado!</h2>
+      <p style={{color:"#94a3b8",fontSize:14,lineHeight:1.5}}>Gracias. El reporte le llegó a la bandeja del equipo. Lo van a revisar.</p>
+      <button onClick={()=>{setEnviado(false);setInst("");setInstOtro("");setAyud("");setAyudOtro("");setTipo("");setCoti("");setCliente("");setDesc("");setFecha(today());}} style={{marginTop:18,...inp,width:"auto",padding:"12px 22px",cursor:"pointer",background:"#2563eb",border:"none",fontWeight:700}}>Reportar otro evento</button>
+    </div>
+  </div></div>;
+
+  return <div style={wrap}>
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');`}</style>
+    <div style={card}>
+      <div style={{textAlign:"center",marginBottom:8}}>
+        <img src="/logo-fpc.png" alt="Grupo FPC" style={{width:64,height:64,objectFit:"contain",marginBottom:6,opacity:.95}}/>
+        <div style={{fontSize:11,fontWeight:800,letterSpacing:3,color:"#d97706"}}>GRUPO FPC</div>
+        <div style={{fontSize:9,fontWeight:700,letterSpacing:3,color:"#475569",marginBottom:2}}>SOLUCIONES DECORATIVAS</div>
+        <h2 style={{color:"#f1f5f9",margin:"6px 0 2px"}}>Reportar un evento</h2>
+        <p style={{color:"#64748b",fontSize:12,margin:0}}>Contanos si un instalador o ayudante tuvo algún problema en un trabajo.</p>
+      </div>
+
+      <label style={lab}>Departamento *</label>
+      <div style={{display:"flex",gap:8}}>
+        <button onClick={()=>{setDept("fpc");setInst("");setAyud("")}} style={{flex:1,...inp,cursor:"pointer",background:dept==="fpc"?"#2563eb":"rgba(2,6,23,.6)",border:dept==="fpc"?"none":inp.border,fontWeight:700}}>FPC Instalaciones</button>
+        <button onClick={()=>{setDept("sp");setInst("");setAyud("")}} style={{flex:1,...inp,cursor:"pointer",background:dept==="sp"?"#0891b2":"rgba(2,6,23,.6)",border:dept==="sp"?"none":inp.border,fontWeight:700}}>Servi Persianas</button>
+      </div>
+
+      <label style={lab}>Tu nombre (quién reporta) *</label>
+      <input style={inp} value={reportaNombre} onChange={e=>setReportaNombre(e.target.value)} placeholder="Ej: Alejandro García"/>
+
+      <label style={lab}>Marca / tienda a la que pertenecés *</label>
+      <select style={inp} value={reportaEmpresa} onChange={e=>setReportaEmpresa(e.target.value)}>
+        <option value="">— Seleccionar marca —</option>
+        {MARCAS_REPORTE.map(m=><option key={m} value={m}>{m}</option>)}
+        <option value="__otro__">Otra (escribir)</option>
+      </select>
+      {reportaEmpresa==="__otro__" && <input style={{...inp,marginTop:8}} value={marcaOtra} onChange={e=>setMarcaOtra(e.target.value)} placeholder="Escribí la marca / tienda"/>}
+
+      <label style={lab}>Instalador</label>
+      <select style={inp} value={inst} onChange={e=>setInst(e.target.value)}>
+        <option value="">— Ninguno / no aplica —</option>
+        {listaInst.map(n=><option key={n} value={n}>{n}</option>)}
+        <option value="__otro__">Otro (no aparece en la lista)</option>
+      </select>
+      {inst==="__otro__" && <input style={{...inp,marginTop:8}} value={instOtro} onChange={e=>setInstOtro(e.target.value)} placeholder="Escribí el nombre del instalador"/>}
+
+      <label style={lab}>Ayudante</label>
+      <select style={inp} value={ayud} onChange={e=>setAyud(e.target.value)}>
+        <option value="">— Ninguno / no aplica —</option>
+        {listaAyud.map(n=><option key={n} value={n}>{n}</option>)}
+        <option value="__otro__">Otro (no aparece en la lista)</option>
+      </select>
+      {ayud==="__otro__" && <input style={{...inp,marginTop:8}} value={ayudOtro} onChange={e=>setAyudOtro(e.target.value)} placeholder="Escribí el nombre del ayudante"/>}
+
+      <label style={lab}>¿Qué pasó? (tipo de evento) *</label>
+      <select style={inp} value={tipo} onChange={e=>setTipo(e.target.value)}>
+        <option value="">— Seleccionar —</option>
+        {TIPOS_REPORTE.map(t=><option key={t} value={t}>{t}</option>)}
+      </select>
+
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1}}>
+          <label style={lab}>Cotización (opcional)</label>
+          <input style={inp} value={coti} onChange={e=>setCoti(e.target.value)} placeholder="Ej: C02SA7830"/>
+        </div>
+        <div style={{flex:1}}>
+          <label style={lab}>Fecha del evento</label>
+          <input style={inp} type="date" value={fecha} onChange={e=>setFecha(e.target.value)}/>
+        </div>
+      </div>
+
+      <label style={lab}>Cliente (opcional)</label>
+      <input style={inp} value={cliente} onChange={e=>setCliente(e.target.value)} placeholder="Nombre del cliente"/>
+
+      <label style={lab}>Descripción / detalle *</label>
+      <textarea style={{...inp,minHeight:90,resize:"vertical"}} value={desc} onChange={e=>setDesc(e.target.value)} placeholder="Contá con detalle qué pasó..."/>
+
+      {err && <div style={{marginTop:12,background:"rgba(239,68,68,.12)",border:"1px solid rgba(239,68,68,.35)",color:"#fca5a5",padding:"10px 14px",borderRadius:10,fontSize:13,fontWeight:600}}>⚠ {err}</div>}
+
+      <button onClick={enviar} disabled={enviando} style={{marginTop:18,width:"100%",padding:"14px",borderRadius:12,border:"none",background:enviando?"#334155":"#16a34a",color:"#fff",fontSize:15,fontWeight:800,cursor:enviando?"wait":"pointer",fontFamily:"inherit"}}>{enviando?"Enviando...":"📨 Enviar reporte"}</button>
+    </div>
+  </div>;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  BANDEJA DE REPORTES  (solo admin/Diana la ven)
+// ═══════════════════════════════════════════════════════════
+function BandejaV({canEdit}){
+  const [reportes,setReportes] = useState([]);
+  const [cargando,setCargando] = useState(true);
+  const [filtro,setFiltro] = useState("pendiente"); // pendiente | leido | archivado | todos
+  const [err,setErr] = useState("");
+
+  const cargar = useCallback(async()=>{
+    setCargando(true); setErr("");
+    try{ setReportes(await DB.getReportes()); }
+    catch(e){ console.error(e); setErr("No se pudieron cargar los reportes."); }
+    finally{ setCargando(false); }
+  },[]);
+  useEffect(()=>{ cargar(); },[cargar]);
+
+  async function cambiarEstado(id,estado){
+    try{ await DB.setReporteEstado(id,estado); setReportes(prev=>prev.map(r=>r.id===id?{...r,estado}:r)); }
+    catch(e){ console.error(e); setErr("No se pudo actualizar el reporte."); }
+  }
+  async function eliminar(id){
+    if(!window.confirm("¿Eliminar este reporte de la bandeja?")) return;
+    try{ await DB.deleteReporte(id); setReportes(prev=>prev.filter(r=>r.id!==id)); }
+    catch(e){ console.error(e); setErr("No se pudo eliminar el reporte."); }
+  }
+
+  const pendientes = reportes.filter(r=>r.estado==="pendiente").length;
+  const vis = reportes.filter(r=> filtro==="todos" ? true : (r.estado||"pendiente")===filtro );
+
+  const estadoColor = e => e==="pendiente"?"#f59e0b": e==="leido"?"#3b82f6":"#64748b";
+  const estadoLabel = e => e==="pendiente"?"● Pendiente": e==="leido"?"✔ Leído":"🗄 Archivado";
+  const fmt = ts => { try{ return new Date(ts).toLocaleString("es-GT",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"}); }catch(_){ return ts||""; } };
+
+  const chip = (val,label,count) => <button onClick={()=>setFiltro(val)} style={{padding:"7px 14px",borderRadius:99,border:filtro===val?"1px solid #2563eb":"1px solid rgba(51,65,85,.4)",background:filtro===val?"rgba(37,99,235,.15)":"transparent",color:filtro===val?"#93c5fd":"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>{label}{typeof count==="number"?` (${count})`:""}</button>;
+
+  return <div>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:8}}>
+      <div>
+        <h1 style={{fontSize:24,fontWeight:900,color:"#f1f5f9",margin:"0 0 4px"}}>📥 Bandeja de Reportes</h1>
+        <p style={{fontSize:13,color:"#475569",margin:0}}>Reportes de eventos enviados por asesores y gerentes. {pendientes>0 && <b style={{color:"#f59e0b"}}>{pendientes} pendiente(s).</b>}</p>
+      </div>
+      <button onClick={cargar} style={{padding:"8px 14px",borderRadius:10,border:"1px solid rgba(51,65,85,.4)",background:"transparent",color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>🔄 Actualizar</button>
+    </div>
+
+    <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+      {chip("pendiente","Pendientes",pendientes)}
+      {chip("leido","Leídos")}
+      {chip("archivado","Archivados")}
+      {chip("todos","Todos",reportes.length)}
+    </div>
+
+    {err && <div style={{marginBottom:14,background:"rgba(239,68,68,.12)",border:"1px solid rgba(239,68,68,.35)",color:"#fca5a5",padding:"10px 14px",borderRadius:10,fontSize:13}}>⚠ {err}</div>}
+    {cargando && <div style={{padding:40,textAlign:"center",color:"#334155"}}>Cargando reportes...</div>}
+    {!cargando && !vis.length && <div className="card"><div style={{padding:40,textAlign:"center",color:"#334155",fontSize:14}}>No hay reportes {filtro!=="todos"?"en esta bandeja":""}.</div></div>}
+
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {vis.map(r=>{
+        const est = r.estado||"pendiente";
+        return <div key={r.id} className="card" style={{padding:16,borderLeft:`3px solid ${estadoColor(est)}`}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",marginBottom:8}}>
+            <span style={{fontSize:11,fontWeight:800,color:estadoColor(est),background:`${estadoColor(est)}18`,padding:"3px 10px",borderRadius:99}}>{estadoLabel(est)}</span>
+            <span style={{fontSize:12,fontWeight:700,color:"#f1f5f9",background:"rgba(37,99,235,.12)",padding:"3px 10px",borderRadius:99}}>{r.tipo||"Sin tipo"}</span>
+            <span style={{fontSize:11,color:"#64748b",textTransform:"uppercase",fontWeight:700}}>{r.dept==="sp"?"Servi Persianas":"FPC"}</span>
+            <span style={{marginLeft:"auto",fontSize:11,color:"#475569"}}>recibido: {fmt(r.created_at)}</span>
+          </div>
+
+          <div style={{fontSize:14,color:"#e2e8f0",lineHeight:1.6}}>
+            <b style={{color:"#fbbf24"}}>{r.reporta_nombre||"Alguien"}</b>{r.reporta_empresa?` (${r.reporta_empresa})`:""} reporta
+            {r.fecha?` el ${r.fecha}`:""}:
+            {r.inst?<> instalador <b style={{color:"#f1f5f9"}}>{r.inst}</b></>:null}
+            {r.inst&&r.ayud?", ":""}
+            {r.ayud?<> ayudante <b style={{color:"#f1f5f9"}}>{r.ayud}</b></>:null}.
+          </div>
+
+          <div style={{marginTop:8,fontSize:13,color:"#cbd5e1",background:"rgba(2,6,23,.5)",borderRadius:10,padding:"10px 12px",whiteSpace:"pre-wrap"}}>{r.descripcion||"(sin descripción)"}</div>
+
+          {(r.coti||r.cliente) && <div style={{marginTop:8,fontSize:12,color:"#64748b",display:"flex",gap:16,flexWrap:"wrap"}}>
+            {r.coti && <span>Cotización: <b style={{color:"#94a3b8"}}>{r.coti}</b></span>}
+            {r.cliente && <span>Cliente: <b style={{color:"#94a3b8"}}>{r.cliente}</b></span>}
+          </div>}
+
+          {canEdit && <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
+            {est!=="leido" && <button onClick={()=>cambiarEstado(r.id,"leido")} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(59,130,246,.4)",background:"rgba(59,130,246,.1)",color:"#93c5fd",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>✔ Marcar leído</button>}
+            {est!=="pendiente" && <button onClick={()=>cambiarEstado(r.id,"pendiente")} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(245,158,11,.4)",background:"rgba(245,158,11,.1)",color:"#fbbf24",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>● Volver a pendiente</button>}
+            {est!=="archivado" && <button onClick={()=>cambiarEstado(r.id,"archivado")} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(100,116,139,.4)",background:"rgba(100,116,139,.1)",color:"#94a3b8",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>🗄 Archivar</button>}
+            <button onClick={()=>eliminar(r.id)} style={{padding:"6px 12px",borderRadius:8,border:"1px solid rgba(239,68,68,.35)",background:"transparent",color:"#ef4444",fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>✕ Eliminar</button>
+          </div>}
+        </div>;
+      })}
     </div>
   </div>;
 }
